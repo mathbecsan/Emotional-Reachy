@@ -281,12 +281,16 @@ class Session:
         self.body.go_to_sleep()
         self.body.wait()
         snoring, last_snore = False, -1e9
-        while not (self.heart.baseline_ready() or self.stage_over()):
+        # No timeout before the first pulse: Reachy sleeps until someone touches a sensor
+        # (the facilitator can still press Next stage). The stage clock starts at the pulse.
+        while not (self.heart.baseline_ready() or (snoring and self.stage_over()) or self.force_next):
             self.check_safety()
             sig = self.hub.snapshot()
             if sig.bpm is not None and sig.finger_on and not snoring:
                 snoring = True
+                self.stage_t0 = self.clock.now()
                 self.log.event("sensor", self.clock.now(), text="Pulse detected: Reachy starts snoring.")
+                self.log.event("stage", self.clock.now(), stage=0, seconds=self.cfg.stage_time[0] / self.clock.scale)
                 self.body.play("snore", loop=True)
             if snoring and self.clock.now() - last_snore > 12:
                 self.voice.say(self.rng.choice(self.SNORES), "en", 0.7, "sleepy")

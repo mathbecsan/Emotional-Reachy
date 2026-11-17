@@ -109,3 +109,13 @@ def test_reachy_body_with_fake_robot():
     assert names[0] == "enable_motors"
     assert "goto_sleep" in names and "wake_up" in names
     assert names.count("goto_target") >= 8
+
+
+def test_waits_as_long_as_needed_for_a_finger(tmp_path):
+    # 300 s with nobody touching the sensors (longer than stage 0's 120 s), then a finger.
+    steps = [{"wait": 300}, {"cmd": "/finger on"}, {"say": "hi", "lang": "en"}]
+    events = run_session(tmp_path, steps)
+    pulse_t = next(e["t"] for e in events if e["kind"] == "sensor" and "snoring" in e["text"])
+    stage1_t = next(e["t"] for e in events if e["kind"] == "stage" and e["stage"] == 1)
+    assert pulse_t >= 300 and stage1_t > pulse_t
+    assert not any(e["kind"] == "say" and e["t"] < pulse_t for e in events)   # silent until the pulse
