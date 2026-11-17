@@ -10,6 +10,7 @@ from dataclasses import asdict, dataclass
 
 import anthropic
 
+from . import elevenlabs
 from .body.moves import ReachyMiniBody, SimBody
 from .body.voice import MacVoice, SimVoice
 from .brain.user_model import UserModel
@@ -39,9 +40,9 @@ class SessionOptions:
     llm: bool = True                # Claude writes the lines; False = offline templates
     heart: str = "sim"              # sim | arduino | arduino-sim (real beat pipeline, synthetic IR)
     camera: bool = False            # face emotion + attention (needs the vision extra)
-    listener: str = "web"           # web | console | mic | scenario
+    listener: str = "elevenlabs"    # elevenlabs (mic + typed) | web (typed) | console | mic (whisper) | scenario
     scenario: str | None = None
-    voice: str = "sim"              # sim (text only) | mac (macOS `say`)
+    voice: str = "elevenlabs"       # elevenlabs (Reachy's speaker) | mac (macOS `say`) | sim (text only)
     time_scale: float = 1.0
     heart_port: str | None = None   # Arduino serial port; None = auto-detect
     pulse_mode: str | None = None   # wake | one | two; None = Config.pulse_mode
@@ -124,7 +125,15 @@ class SessionRunner:
             except anthropic.AnthropicError as e:
                 logger.warning("Claude client unavailable (%s); using offline templates.", e)
         body = ReachyMiniBody(self.robot, cfg.use_emotion_library, rng) if self.robot is not None else SimBody(clock)
-        voice = MacVoice(clock) if opts.voice == "mac" else SimVoice(clock)
+        has_el = elevenlabs.api_key() is not None
+        if (opts.voice == "elevenlabs" or opts.listener == "elevenlabs") and not has_el:
+            self.bus.emit("error", message="No ELEVENLABS_API_KEY in .env: using the macOS voice and typed input.")
+        if opts.voice == "elevenlabs" and has_el:
+            voice = elevenlabs.ElevenLabsVoice(clock)
+        elif opts.voice in ("mac", "elevenlabs"):
+            voice = MacVoice(clock)
+        else:
+            voice = SimVoice(clock)
         user = UserModel(language=opts.language_hint, no_tease=opts.no_tease)
         session = Session(cfg, clock, hub, heart, body, voice, writer, log, user, profile, sim_heart, rng)
 
@@ -132,6 +141,8 @@ class SessionRunner:
             listener = ScriptedListener(opts.scenario, session.on_command, clock)
         elif opts.listener == "console":
             listener = ConsoleListener(session.on_command, clock, opts.language_hint)
+        elif opts.listener == "elevenlabs" and has_el:
+            listener = self.web_listener = elevenlabs.ElevenLabsListener(clock)
         elif opts.listener == "mic":
             from .perception.speech import WhisperListener
 

@@ -35,9 +35,20 @@ beating-in-sync                            # web UI at http://localhost:7860, si
 | Find the Arduino's port | `beating-in-sync --list-ports` |
 | As a Reachy Mini app (dashboard) | installed via the `reachy_mini_apps` entry point `BeatingInSyncApp` |
 
+## Voice and hearing (ElevenLabs)
+
+Put `ELEVENLABS_API_KEY=...` in `.env` (never commit it). Reachy then speaks with
+ElevenLabs' multilingual low-latency model (`eleven_flash_v2_5`, voice "Callum —
+Husky Trickster", override with `ELEVENLABS_VOICE_ID`) **through its own speaker**
+(the "Reachy Mini Audio" device), and hears through its own mic with ElevenLabs
+Scribe, which also detects the language. The noise floor is measured before every
+listen, so Reachy's fan doesn't trigger it. Lines typed in the UI work alongside the
+mic. Without a key: macOS voice + typed input.
+
 ## The room setup (hardware)
 
-1. **Reachy Mini**: daemon running (`reachy-mini-daemon`), motors powered. Check
+1. **Reachy Mini**: daemon running (`reachy-mini-daemon`), motors powered. If the
+   status shows a motor error after fixing power, `curl -X POST localhost:8000/api/daemon/restart`. Check
    `curl localhost:8000/api/daemon/status` reports no error.
 2. **Pulse sensors**: Arduino Nano with two MAX30102 sensors (red lights on all
    three boards), plugged in by USB. Firmware is already on the Nano; it prints
@@ -50,10 +61,11 @@ beating-in-sync                            # web UI at http://localhost:7860, si
 
 ### How the two sensors drive the session (`BIS_PULSE_MODE`)
 
-- **wake** (default): stage 0, the participant rests one finger on **sensor 1**
+- **one** (default): a finger on either sensor -> once a pulse locks, Reachy starts
+  **snoring** while the 60 s baseline is recorded, then wakes up and starts talking.
+- **wake**: stage 0, the participant rests one finger on **sensor 1**
   for the 60 s baseline. Stage 1, the UI prompts them to **press sensor 2** —
   that pulse is what wakes Reachy. After that BPM is the mean of both sensors.
-- **one**: any sensor with a pulse wakes Reachy.
 - **two**: sensor 2 is a second person. Both fingers on → two people in the room
   (Reachy flirts with one to make the other jealous) and, if both hearts settle
   within 3 BPM, Reachy has its *"you're beating in sync"* moment.

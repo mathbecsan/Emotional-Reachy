@@ -28,9 +28,13 @@ function startForm(onStarted) {
   const port = h("select", { name: "heart_port" }, h("option", { value: "" }, "auto-detect"));
   const camera = h("input", { type: "checkbox", name: "camera" });
   const listener = h("select", { name: "listener" },
-    h("option", { value: "web" }, "Typed here (rehearsal / Wizard-of-Oz)"),
-    h("option", { value: "mic" }, "Microphone (Whisper)"));
-  const voice = h("select", { name: "voice" }, h("option", { value: "sim" }, "Text only"), h("option", { value: "mac" }, "macOS voice"));
+    h("option", { value: "elevenlabs" }, "Reachy's microphone (ElevenLabs) + typed"),
+    h("option", { value: "web" }, "Typed here only (rehearsal / Wizard-of-Oz)"),
+    h("option", { value: "mic" }, "Microphone (local Whisper)"));
+  const voice = h("select", { name: "voice" },
+    h("option", { value: "elevenlabs" }, "ElevenLabs, from Reachy's speaker"),
+    h("option", { value: "mac" }, "macOS voice"),
+    h("option", { value: "sim" }, "Text only (silent)"));
   const scale = h("select", { name: "time_scale" }, [1, 2, 5, 10].map((s) => h("option", { value: s }, s === 1 ? "Real time" : `${s}× faster`)));
   const portRow = field("Serial port", port, "Close the Arduino IDE serial monitor and pulse_triple.py first: only one program can read the port.");
   const syncPort = () => { portRow.hidden = heart.value !== "arduino"; };
@@ -91,13 +95,17 @@ function controls(getLang) {
       btn("Next stage", "/next", "", "Advance if Reachy stalls"),
       btn("Scold now", "/scold", "", "Manual attention trigger if the camera check is unreliable"),
       btn("Pause", "/pause", "btn--danger", "Stop word: Reachy drops the act, says a sincere goodbye, sleeps")),
-    h("div", { class: "controls__say", dataset: { listener: "web" } },
-      h("h3", { class: "card__sub" }, "Participant (typed)"), sayForm),
+    h("h3", { class: "card__sub" }, "Pulse sensor (simulated)"),
+    h("div", { class: "btn-row" },
+      btn("♥ Finger on sensor", "/finger on", "btn--primary", "Participant puts their finger on the sensor: Reachy snores, then wakes"),
+      btn("Finger off", "/finger off", "", "Participant lets go: mid-session Reachy asks for their heartbeat back"),
+      btn("♥ +15 BPM", "/bpm 15", "", "Simulate a heart-rate jump")),
+    h("div", { class: "controls__say" },
+      h("h3", { class: "card__sub" }, "Participant (typed — works alongside the mic)"), sayForm),
     h("details", { class: "controls__sim" },
       h("summary", {}, "Simulate senses"),
       h("div", { class: "btn-row" },
-        btn("Hand on pad", "/hand on"), btn("Hand off", "/hand off"),
-        btn("♥ +15 BPM", "/bpm 15"), btn("Look away", "/look away 4"), btn("Look back", "/look back"),
+        btn("Sensor 2 on", "/hand on"), btn("Sensor 2 off", "/hand off"), btn("Look away", "/look away 4"), btn("Look back", "/look back"),
         btn("2 people", "/people 2"), btn("1 person", "/people 1"),
         btn("Face: happy", "/face happy 0.8"), btn("Face: sad", "/face sad 0.8"), btn("Dancing", "/move 0.7"))));
   return { el: root, setLang(l) { if (l && LANGS[l]) lang.value = l; } };

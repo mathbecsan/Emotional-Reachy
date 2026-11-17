@@ -265,23 +265,36 @@ class Session:
         self.stage6_goodbye()
         self.stage7_visualization()
 
+    SNORES = ["Zzz... hnnnk... zzz...", "Mmm... five more minutes...", "Zzzzz... shhhh... zzz...",
+              "Hnnnk... mmm... no... not the pasta... zzz...", "Zzz... ba-dum... ba-dum... zzz..."]
+
     def stage0_baseline(self):
+        """Asleep and silent until a pulse arrives; then Reachy snores while the
+        baseline is recorded, and wakes up once it has 60 s of stable heartbeat."""
         self.enter(0)
         self.log.event("prompt", self.clock.now(), text=self.cfg.prompts["baseline"])
-        self.body.play("sleepy", loop=True)
-        last_mumble = self.clock.now()
+        self.body.go_to_sleep()
+        self.body.wait()
+        snoring, last_snore = False, -1e9
         while not (self.heart.baseline_ready() or self.stage_over()):
             self.check_safety()
-            if self.clock.now() - last_mumble > 45:
-                self.voice.say(self.rng.choice(["Mmm... five more minutes...", "Zzz..."]), "en", 0.75, "sleepy")
-                last_mumble = self.clock.now()
-            self.clock.sleep(1.0)
+            sig = self.hub.snapshot()
+            if sig.bpm is not None and sig.finger_on and not snoring:
+                snoring = True
+                self.log.event("sensor", self.clock.now(), text="Pulse detected: Reachy starts snoring.")
+                self.body.play("snore", loop=True)
+            if snoring and self.clock.now() - last_snore > 12:
+                self.voice.say(self.rng.choice(self.SNORES), "en", 0.7, "sleepy")
+                self.log.event("say", self.clock.now(), text="(snoring)", mode="sleepy", lang="en")
+                last_snore = self.clock.now()
+            self.listener_peek()
         logger.info("heart baseline = %s BPM", self.heart.baseline and round(self.heart.baseline, 1))
         self.log.event("baseline", self.clock.now(), bpm=self.heart.baseline)
 
     def stage1_wake(self):
         self.enter(1)
-        self.log.event("prompt", self.clock.now(), text=self.cfg.prompts["wake"])
+        if not self.hub.snapshot().pulse_present:
+            self.log.event("prompt", self.clock.now(), text=self.cfg.prompts["wake"])
         nudged = False
         while not self.hub.snapshot().pulse_present and not self.stage_over():
             self.check_safety()
@@ -309,6 +322,10 @@ class Session:
                 self.clock.sleep(1)
                 return
             step = self.listener.steps[self.listener.i]
+            if "wait" in step:
+                self.listener.i += 1
+                self.clock.sleep(step["wait"])
+                return
             if "cmd" in step:
                 self.listener.i += 1
                 logger.info("[event] %s", step["cmd"])

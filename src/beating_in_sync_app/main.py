@@ -39,9 +39,9 @@ def parse_args(argv=None) -> argparse.Namespace:
     p.add_argument("--camera", action="store_true", help="face emotion + attention from the camera")
     p.add_argument("--list-ports", action="store_true", help="list serial ports and exit")
     p.add_argument("--check", action="store_true", help="preflight: Reachy daemon, pulse sensors, Claude key")
-    p.add_argument("--listener", choices=["console", "mic", "scenario", "web"], default=None)
+    p.add_argument("--listener", choices=["elevenlabs", "console", "mic", "scenario", "web"], default=None)
     p.add_argument("--scenario", default=None)
-    p.add_argument("--voice", choices=["sim", "mac"], default="sim")
+    p.add_argument("--voice", choices=["elevenlabs", "mac", "sim"], default="elevenlabs")
     p.add_argument("--scale", type=float, default=1.0, help="speed up the session clock (simulation only)")
     p.add_argument("--ui-port", type=int, default=UI_PORT)
     p.add_argument("--debug", action="store_true")
@@ -55,8 +55,14 @@ def setup_logging(debug: bool) -> None:
         logging.getLogger(noisy).setLevel(logging.WARNING)
 
 
+def load_env() -> None:
+    """.env from the working directory, then the project root (where `.env.example` lives)."""
+    load_dotenv(Path.cwd() / ".env")
+    load_dotenv(Path(__file__).resolve().parents[2] / ".env")
+
+
 def options_from_args(args: argparse.Namespace) -> SessionOptions:
-    listener = args.listener or ("scenario" if args.scenario else "console")
+    listener = args.listener or ("scenario" if args.scenario else "elevenlabs")
     return SessionOptions(participant=args.participant, profile=args.profile, no_tease=args.no_tease,
                           llm=not args.no_llm, heart=args.heart, heart_port=args.heart_port,
                           pulse_mode=args.pulse_mode, camera=args.camera, listener=listener,
@@ -64,14 +70,17 @@ def options_from_args(args: argparse.Namespace) -> SessionOptions:
 
 
 def run(args: argparse.Namespace, robot=None, settings_app=None, stop_event: threading.Event | None = None) -> None:
-    load_dotenv(Path.cwd() / ".env")
+    load_env()
     cfg = config_from_env()
     bus = EventBus()
 
     if robot is None and args.robot:
         from reachy_mini import ReachyMini
 
-        robot = ReachyMini(**({"robot_name": args.robot_name} if args.robot_name else {}))
+        # Speech and music play on this computer, so Reachy's media pipeline isn't needed
+        # (and the daemon may run with --no-media, where initialising it hangs).
+        robot = ReachyMini(media_backend="no_media", **({"robot_name": args.robot_name} if args.robot_name else {}))
+        logger.info("Connected to Reachy Mini")
     runner = SessionRunner(bus, cfg, robot)
 
     if args.headless:
@@ -108,7 +117,7 @@ def preflight() -> int:
 
     from .perception.pulse_sensor import find_arduino, list_ports
 
-    load_dotenv(Path.cwd() / ".env")
+    load_env()
     problems = 0
 
     def report(ok: bool, what: str, detail: str = "") -> None:
@@ -128,6 +137,25 @@ def preflight() -> int:
     port = find_arduino()
     report(port is not None, "Pulse Arduino", port or "no free port is streaming ir1,ir2 (plugged in? pulse_triple.py closed?)")
 
+    el = os.environ.get("ELEVENLABS_API_KEY")
+    if el:
+        try:
+            r = urllib.request.urlopen(urllib.request.Request("https://api.elevenlabs.io/v1/user/subscription",
+                                                              headers={"xi-api-key": el}), timeout=8)
+            sub = json.load(r)
+            report(True, "ElevenLabs", f"{sub.get('character_limit', 0) - sub.get('character_count', 0)} characters left")
+        except (urllib.error.URLError, TimeoutError) as e:
+            report(False, "ElevenLabs", f"key rejected or unreachable ({e})")
+    else:
+        report(False, "ElevenLabs", "no ELEVENLABS_API_KEY: no voice, no hearing")
+    try:
+        import sounddevice as sd
+
+        names = [d["name"] for d in sd.query_devices()]
+        report(any("Reachy" in n for n in names), "Reachy audio", "Reachy Mini Audio found" if any("Reachy" in n for n in names)
+               else "Reachy's mic/speaker not found; laptop audio will be used")
+    except (ImportError, OSError) as e:
+        report(False, "Audio devices", str(e))
     has_key = bool(os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_AUTH_TOKEN"))
     report(has_key, "Claude", "key found" if has_key else "no ANTHROPIC_API_KEY: Reachy will use offline English lines")
     return problems

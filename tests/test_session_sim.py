@@ -12,7 +12,7 @@ SCENARIO = Path(__file__).parents[1] / "scenarios" / "demo_participant.json"
 def run(tmp_path, **kw):
     bus = EventBus()
     runner = SessionRunner(bus, Config(sessions_dir=str(tmp_path)))
-    runner.start(SessionOptions(llm=False, listener="scenario", scenario=str(SCENARIO), time_scale=40, **kw))
+    runner.start(SessionOptions(llm=False, voice="sim", listener="scenario", scenario=str(SCENARIO), time_scale=40, **kw))
     runner.wait()
     log = next(tmp_path.glob("*.jsonl"))
     return [json.loads(line) for line in log.read_text().splitlines()]

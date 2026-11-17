@@ -22,6 +22,9 @@ NEUTRAL = Pose(dur=0.8)
 GESTURES = {
     # Head down, slow sway, antennas drooped
     "sleepy": [Pose(pitch=28, z=-12, ant=(70, 70), roll=-4, dur=2.0), Pose(pitch=30, z=-14, ant=(75, 72), roll=5, dur=2.5)],
+    # Snoring: slow inhale / exhale around the sleep pose, antennas twitch on the exhale
+    "snore": [Pose(pitch=24, z=-9, ant=(66, 70), dur=1.6), Pose(pitch=30, z=-15, ant=(78, 74), dur=2.0),
+              Pose(pitch=30, z=-15, ant=(72, 80), dur=0.3)],
     # Wake-up: head lifts slowly, antennas twitch, stretch
     "wake": [Pose(pitch=25, z=-10, ant=(60, 60), dur=1.5), Pose(pitch=0, z=6, ant=(20, 20), dur=2.0),
              Pose(pitch=-12, z=12, ant=(-25, -25), roll=6, dur=1.0), Pose(ant=(5, -10), dur=0.3), Pose(ant=(-10, 5), dur=0.3), NEUTRAL],

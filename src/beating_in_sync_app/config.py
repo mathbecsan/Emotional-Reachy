@@ -20,14 +20,14 @@ class Config:
     bpm_stop_limit: float = 130.0        # safety: above this ...
     bpm_stop_duration_s: float = 30.0    # ... for this long -> stop + sincere goodbye
 
-    pulse_mode: str = "wake"             # wake | one | two (see perception/pulse_sensor.py)
+    pulse_mode: str = "one"              # one | wake | two (see perception/pulse_sensor.py)
     finger_min: int = 20000              # IR level that counts as a finger (pulse_triple --finger-min)
     finger_lost_s: float = 6.0           # finger off the sensors this long -> Reachy asks for it back
 
     # What the facilitator UI tells the participant (Arduino setup: two finger sensors).
     prompts: dict = field(default_factory=lambda: {
-        "baseline": "Rest one finger gently on sensor 1 and breathe normally. No talking for now.",
-        "wake": "Now press your other finger on sensor 2 to bring Reachy to life.",
+        "baseline": "Place a finger gently on a pulse sensor and breathe normally. Reachy will hear your heart.",
+        "wake": "Place a finger on a pulse sensor to bring Reachy to life.",
     })
 
     # --- Attention / camera -------------------------------------------------

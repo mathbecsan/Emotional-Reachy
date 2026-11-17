@@ -111,6 +111,10 @@ class ReachyMiniBody(BaseBody):
         self.np, self.create_head_pose = np, create_head_pose
         self.robot = robot
         self.rng = rng or random.Random()
+        try:
+            robot.enable_motors()
+        except Exception as e:  # SDK raises various errors when the daemon is unhappy; keep going and log
+            logger.error("Could not enable Reachy's motors: %s", e)
         self.library = None
         self.available: set[str] = set()
         if use_emotion_library:
@@ -159,16 +163,18 @@ class ReachyMiniBody(BaseBody):
 
     def wake_up(self) -> None:
         self._stop.set()
+        if self._thread and self._thread.is_alive():
+            self._thread.join(timeout=3)   # let the snore keyframe finish: the SDK refuses overlapping moves
         try:
-            self.robot.wake_up()
-        except (RuntimeError, ConnectionError) as e:
-            logger.warning("SDK wake_up failed (%s); using keyframes", e)
+            self.robot.wake_up()  # also plays wake_up.wav, which fails when the daemon runs --no-media
+        except Exception as e:
+            logger.warning("SDK wake_up incomplete (%s); continuing with keyframes", e)
         self.play("wake")
 
     def go_to_sleep(self) -> None:
         self._stop.set()
         try:
             self.robot.goto_sleep()
-        except (RuntimeError, ConnectionError) as e:
+        except Exception as e:
             logger.warning("SDK goto_sleep failed (%s); using keyframes", e)
             self.play("to_sleep")

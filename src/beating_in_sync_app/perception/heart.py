@@ -97,7 +97,7 @@ class SimHeartSource(threading.Thread):
         self.rest = 71.0 + self.rng.uniform(-4, 4)
         self.offset = 0.0
         self.hand_on = False        # stage-1 wake gesture (sensor 2 / "hand on pad")
-        self.finger_on = True       # resting finger on sensor 1 since stage 0
+        self.finger_on = False      # participant's finger on sensor 1 (the "/finger on" button)
         self.push = push            # False: only model the BPM, a SimulatedArduino reports it
         self._bpm = self.rest
         self._lock = threading.Lock()
@@ -134,5 +134,6 @@ class SimHeartSource(threading.Thread):
             if self.push:
                 if self.finger_on:
                     self.a.push(round(self._bpm, 1))
-                self.a.hub.update(pulse_present=self.hand_on, finger_on=self.finger_on)
+                # Simulation: any finger on a sensor counts as the pulse that wakes Reachy.
+                self.a.hub.update(pulse_present=self.finger_on or self.hand_on, finger_on=self.finger_on)
             self.clock.sleep(1.0)
