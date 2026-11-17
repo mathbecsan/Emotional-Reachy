@@ -54,9 +54,9 @@ def build_emotion_cnn():
 
 
 class FacePerception(threading.Thread):
-    def __init__(self, cfg: Config, hub: SignalHub, show_window=False):
+    def __init__(self, cfg: Config, hub: SignalHub, show_window=False, session_log=None):
         super().__init__(daemon=True)
-        self.cfg, self.hub, self.show = cfg, hub, show_window
+        self.cfg, self.hub, self.show, self.log = cfg, hub, show_window, session_log
         self.model = None
 
     def _load_model(self):
@@ -85,6 +85,17 @@ class FacePerception(threading.Thread):
         self._load_model()
         frontal = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
         cap = cv2.VideoCapture(self.cfg.camera_index)
+        ok = cap.isOpened() and cap.read()[0]
+        if not ok:
+            msg = ("Camera unavailable: allow camera access for this app in System Settings > Privacy & Security > "
+                   f"Camera (index {self.cfg.camera_index}). Reachy continues without seeing faces.")
+            logger.error(msg)
+            if self.log is not None:
+                self.log.event("sensor", 0.0, text=msg)
+            return
+        logger.info("Camera %s open: face emotion + attention on", self.cfg.camera_index)
+        if self.log is not None:
+            self.log.event("sensor", 0.0, text="Camera on: Reachy can see faces.")
         last_seen = time.monotonic()
         prev_gray = None
         smooth = {}
@@ -100,6 +111,8 @@ class FacePerception(threading.Thread):
             if len(faces):
                 last_seen = now
                 x, y, w, h = max(faces, key=lambda f: f[2] * f[3])      # closest person
+                fh, fw = gray.shape
+                upd.update(face_x=round(((x + w / 2) / fw) * 2 - 1, 2), face_y=round(((y + h / 2) / fh) * 2 - 1, 2))
                 if self.model is not None:
                     label, conf = self._predict(gray[y:y + h, x:x + w])
                     # exponential smoothing so one noisy frame doesn't flip Reachy's mood

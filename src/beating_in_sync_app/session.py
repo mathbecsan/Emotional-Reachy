@@ -123,7 +123,12 @@ class Session:
             self.sim_heart.react(mode.value)
 
     def hear(self, timeout=None):
-        self.body.play("listen")
+        sig = self.hub.snapshot()
+        if sig.face_visible and (abs(sig.face_x) > 0.15 or abs(sig.face_y) > 0.2):
+            self.body.look_at(sig.face_x, sig.face_y)   # turn toward the person before listening
+            self.body.wait()
+        else:
+            self.body.play("listen")
         self.log.event("listening", self.clock.now(), timeout=timeout or self.cfg.listen_timeout_s)
         u = self.listener.listen(timeout or self.cfg.listen_timeout_s)
         self.check_safety()

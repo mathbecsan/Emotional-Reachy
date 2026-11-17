@@ -39,7 +39,7 @@ class SessionOptions:
     language_hint: str = "en"       # language Reachy starts in (before introductions)
     llm: bool = True                # Claude writes the lines; False = offline templates
     heart: str = "sim"              # sim | arduino | arduino-sim (real beat pipeline, synthetic IR)
-    camera: bool = False            # face emotion + attention (needs the vision extra)
+    camera: bool = True             # face emotion + attention (needs the vision extra)
     listener: str = "elevenlabs"    # elevenlabs (mic + typed) | web (typed) | console | mic (whisper) | scenario
     scenario: str | None = None
     voice: str = "elevenlabs"       # elevenlabs (Reachy's speaker) | mac (macOS `say`) | sim (text only)
@@ -113,7 +113,7 @@ class SessionRunner:
         if opts.camera:
             from .perception.face import FacePerception
 
-            FacePerception(cfg, hub).start()
+            FacePerception(cfg, hub, session_log=log).start()
 
         profile = load_profile(opts.profile)
         templates = TemplateWriter(rng)

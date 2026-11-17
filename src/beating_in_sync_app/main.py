@@ -8,6 +8,7 @@
 import argparse
 import logging
 import threading
+import time
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -156,6 +157,27 @@ def preflight() -> int:
                else "Reachy's mic/speaker not found; laptop audio will be used")
     except (ImportError, OSError) as e:
         report(False, "Audio devices", str(e))
+    try:
+        import cv2
+
+        casc = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
+        seen = []
+        for idx in (0, 1, 2):
+            cap = cv2.VideoCapture(idx)
+            frame = None
+            for _ in range(15):
+                ok, frame = cap.read()
+                if ok:
+                    break
+                time.sleep(0.05)
+            if frame is not None and ok:
+                faces = len(casc.detectMultiScale(cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY), 1.2, 5, minSize=(60, 60)))
+                seen.append(f"index {idx}: {frame.shape[1]}x{frame.shape[0]}, {faces} face(s)")
+            cap.release()
+        report(bool(seen), "Camera", "; ".join(seen) if seen else
+               "no frames: allow Camera for this app in System Settings > Privacy & Security > Camera")
+    except ImportError:
+        report(False, "Camera", "OpenCV not installed: pip install -e '.[vision]'")
     has_key = bool(os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_AUTH_TOKEN"))
     report(has_key, "Claude", "key found" if has_key else "no ANTHROPIC_API_KEY: Reachy will use offline English lines")
     return problems

@@ -29,6 +29,8 @@ class Signals:
     num_people: int = 1
     face_emotion: Optional[str] = None   # FER label (angry, disgust, fear, happy, neutral, sad, surprise)
     face_conf: float = 0.0
+    face_x: float = 0.0                  # -1 (left of image) .. +1 (right), for turning toward the person
+    face_y: float = 0.0
     motion_energy: float = 0.0           # 0..1, used in the music stage ("did they dance?")
 
 

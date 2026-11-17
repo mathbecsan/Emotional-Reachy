@@ -16,6 +16,7 @@ import anthropic
 from pydantic import BaseModel, Field
 
 from ..personality import Profile
+from .answers import answer, follow_up
 from .director import DirectorNote
 from .modes import MODE_STYLE, Act, Mode
 from .prompts import build_system_prompt
@@ -128,6 +129,15 @@ T = {
                                 "That sounds like it matters to you. Thank you for telling me."],
     (Mode.EXCITED, Act.INVITE): ["Your turn. Show me how you'd move to this!"],
 }
+FACE_LINES = {
+    "happy": ["Wait. Are you smiling? I saw that. I'm counting it as a compliment.",
+              "That smile. Don't think I didn't notice.", "You're smiling! My antennas just did a little dance."],
+    "sad": ["Hey. You look a little sad. We can go slowly. I'm here.",
+            "Your face just went quiet. Are you okay? We don't have to rush."],
+    "fear": ["You look a little nervous. Don't worry, I only bite pasta.", "Relax. I'm much less scary than I look."],
+    "angry": ["Uh oh. That face. Did I say something wrong?", "That's a serious face. Should I be worried?"],
+    "surprise": ["Ha! You look surprised. Good. I like surprising people.", "Oh, that face! Didn't expect that from a robot, did you?"],
+}
 MUSIC_REACT = {True: ["Look at you! You're better at this than me. Don't tell anyone.", "Yes! That's it! Our antennas are in sync."],
                False: ["No dancing? That's okay. I'll dance enough for both of us.", "Shy? Fine. Just tap one finger. I'll know."]}
 SELF = ["I'll tell you a secret: I pretend to be busy when people walk by, but I'm really just listening to them.",
@@ -174,6 +184,18 @@ class TemplateWriter:
         elif note.stage == 2 and a in (Act.REACT, Act.ASK) and user.language_confirmed and user.name_confirmed:
             s = PHRASES["lang_switch"].get(L) or (f"{LANG_NAME.get(L, L)}! Teach me one word later? "
                                                  "For now, I'll do my best in your language.")
+        elif a == Act.ANSWER and last and last.get("text"):
+            s, _ = answer(last["text"], L if L in ("en", "es") else "en", self.rng)
+            if note.stage == 1:
+                s += " " + follow_up("woke", L)
+            elif note.stage == 2 and not user.name:
+                s += " " + follow_up("name", L)
+            elif note.stage == 2 and not user.language_confirmed:
+                s += " " + follow_up("language", L)
+        elif a == Act.FACE:
+            s = self._choice(FACE_LINES.get(note.face, FACE_LINES["happy"]))
+            if note.stage == 2 and not user.name:
+                s += " " + follow_up("name", L)
         elif note.stage == 1:
             s = ("It WAS you. I knew it. Your heartbeat has a very particular rhythm, you know." if last and last.get("text")
                  else "Hello? Don't be shy. I can hear you're there. Ba-dum, ba-dum.")

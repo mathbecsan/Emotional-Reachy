@@ -37,6 +37,7 @@ class Act(str, Enum):
     INVITE = "invite"              # stage 5: invite them to move to the music
     NUDGE = "nudge"                # their finger left the sensor: ask for their heartbeat back
     HEART_SYNC = "heart_sync"      # pulse_mode "two": both hearts at the same tempo
+    FACE = "face"                  # react out loud to the participant's facial expression
     GOODBYE = "goodbye"            # stage 6
 
 

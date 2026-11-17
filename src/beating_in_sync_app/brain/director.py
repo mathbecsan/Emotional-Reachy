@@ -56,6 +56,7 @@ class DirectorNote:
     callback: Optional[str] = None
     two_people: bool = False
     say_name_wrong: bool = False
+    face: Optional[str] = None
     constraints: list = field(default_factory=list)
 
 
@@ -75,6 +76,7 @@ class Director:
         self.finger_off_since: Optional[float] = None
         self.last_nudge_t = -1e9
         self.sync_commented = False
+        self.last_face_t = -1e9
 
     # ------------------------------------------------------------------ helpers
     def provocation_allowed(self, stage: int, user: UserModel, mode: Mode) -> bool:
@@ -119,7 +121,8 @@ class Director:
         if stage == 0:
             mode, act, reason = Mode.SLEEPY, Act.SELF_DISCLOSE, "asleep"
         elif stage == 1:
-            mode, act, reason = Mode.CURIOUS, (Act.ASK if silent else Act.REACT), "waking up"
+            act = Act.ANSWER if "ask_robot" in cues else (Act.ASK if silent else Act.REACT)
+            mode, reason = Mode.CURIOUS, "waking up" + (" | they asked something" if act == Act.ANSWER else "")
         elif stage == 6:
             mode, act, reason = Mode.SINCERE, Act.GOODBYE, "repair and goodbye"
         elif stage == 5:
@@ -140,6 +143,14 @@ class Director:
             elif sig.hearts_in_sync and not self.sync_commented and stage >= 3:
                 self.sync_commented = True
                 mode, act, reason = Mode.EXCITED, Act.HEART_SYNC, "both hearts at the same tempo"
+            elif (sig.face_emotion in ("happy", "sad", "surprise", "angry", "fear") and sig.face_conf >= 0.45
+                  and t - self.last_face_t > 35 and "ask_robot" not in cues and "discomfort" not in cues):
+                # Visible proof that Reachy sees them: name the expression out loud.
+                self.last_face_t = t
+                face_mode = {"happy": Mode.FLIRTY if stage >= 3 and not user.no_tease else Mode.EXCITED,
+                             "sad": Mode.SINCERE, "fear": Mode.SINCERE, "angry": Mode.CURIOUS, "surprise": Mode.EXCITED}
+                mode, act = face_mode[sig.face_emotion], Act.FACE
+                reason = f"saw their face: {sig.face_emotion} ({sig.face_conf:.0%})"
 
         # ---- signal-driven modes (stages 2-4) ----------------------------------
         if mode is None:
@@ -225,7 +236,11 @@ class Director:
         waits for an answer at all."""
         topics = (ana.topics if ana else []) + user.topics[-3:]
 
-        if note.act in (Act.NUDGE, Act.HEART_SYNC):
+        if note.act in (Act.NUDGE, Act.HEART_SYNC, Act.FACE):
+            if note.act == Act.FACE:
+                note.face = note.reason.split(": ")[-1].split(" ")[0]
+            if stage == 2 and note.act == Act.FACE:
+                note.constraints.append("After reacting to their face, still ask for their name or language.")
             return
         if stage == 2 and note.act not in (Act.HEART_COMMENT, Act.ANSWER):
             if user.name and not user.said_name_wrong and not user.name_confirmed:

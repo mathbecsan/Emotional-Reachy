@@ -81,6 +81,10 @@ class BaseBody:
     def wake_up(self) -> None:
         self.play("wake")
 
+    def look_at(self, face_x: float, face_y: float) -> None:
+        """Turn the head toward the person's face (image coords -1..1)."""
+        self.play([Pose(yaw=-face_x * 28, pitch=face_y * 12, dur=0.5)])
+
     def go_to_sleep(self) -> None:
         self.play("to_sleep")
 

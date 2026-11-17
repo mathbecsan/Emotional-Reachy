@@ -26,7 +26,7 @@ function startForm(onStarted) {
     h("option", { value: "arduino" }, "Arduino pulse sensors"),
     h("option", { value: "arduino-sim" }, "Arduino pipeline, simulated signal"));
   const port = h("select", { name: "heart_port" }, h("option", { value: "" }, "auto-detect"));
-  const camera = h("input", { type: "checkbox", name: "camera" });
+  const camera = h("input", { type: "checkbox", name: "camera", checked: true });
   const listener = h("select", { name: "listener" },
     h("option", { value: "elevenlabs" }, "Reachy's microphone (ElevenLabs) + typed"),
     h("option", { value: "web" }, "Typed here only (rehearsal / Wizard-of-Oz)"),
