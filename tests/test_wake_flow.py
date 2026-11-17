@@ -119,3 +119,10 @@ def test_waits_as_long_as_needed_for_a_finger(tmp_path):
     stage1_t = next(e["t"] for e in events if e["kind"] == "stage" and e["stage"] == 1)
     assert pulse_t >= 300 and stage1_t > pulse_t
     assert not any(e["kind"] == "say" and e["t"] < pulse_t for e in events)   # silent until the pulse
+
+
+def test_next_stage_during_snoring_still_sets_a_baseline(tmp_path):
+    steps = [{"cmd": "/finger on"}, {"wait": 20}, {"cmd": "/next"}, {"say": "hi", "lang": "en"}]
+    events = run_session(tmp_path, steps)
+    base = next(e for e in events if e["kind"] == "baseline")
+    assert base["bpm"] is not None and 50 < base["bpm"] < 100

@@ -125,8 +125,7 @@ class Session:
     def hear(self, timeout=None):
         sig = self.hub.snapshot()
         if sig.face_visible and (abs(sig.face_x) > 0.15 or abs(sig.face_y) > 0.2):
-            self.body.look_at(sig.face_x, sig.face_y)   # turn toward the person before listening
-            self.body.wait()
+            self.body.look_at(sig.face_x, sig.face_y)   # turn toward the person while listening
         else:
             self.body.play("listen")
         self.log.event("listening", self.clock.now(), timeout=timeout or self.cfg.listen_timeout_s)
@@ -172,7 +171,8 @@ class Session:
             lang = ana.mentioned_language or (ana.language if ana.language and ana.language != "en" else None)
             if lang and u.name_confirmed:
                 u.language, u.language_confirmed = lang, True
-        if self.stage in (3, 4) and not u.loves and ana.words >= 3 and (
+        if self.stage in (3, 4) and not u.loves and ana.words >= 4 and "bored_user" not in ana.cues \
+                and "ask_robot" not in ana.cues and (
                 "love_talk" in ana.cues or self.director.act_history[-1:] == [Act.ASK]):
             u.loves.append(clean_love(ana.text))
 
@@ -290,13 +290,15 @@ class Session:
                 snoring = True
                 self.stage_t0 = self.clock.now()
                 self.log.event("sensor", self.clock.now(), text="Pulse detected: Reachy starts snoring.")
-                self.log.event("stage", self.clock.now(), stage=0, seconds=self.cfg.stage_time[0] / self.clock.scale)
+                self.log.event("stage_clock", self.clock.now(), stage=0,
+                               seconds=self.cfg.stage_time[0] / self.clock.scale)
                 self.body.play("snore", loop=True)
             if snoring and self.clock.now() - last_snore > 12:
                 self.voice.say(self.rng.choice(self.SNORES), "en", 0.7, "sleepy")
                 self.log.event("say", self.clock.now(), text="(snoring)", mode="sleepy", lang="en")
                 last_snore = self.clock.now()
             self.listener_peek()
+        self.heart.settle_baseline()
         logger.info("heart baseline = %s BPM", self.heart.baseline and round(self.heart.baseline, 1))
         self.log.event("baseline", self.clock.now(), bpm=self.heart.baseline)
 

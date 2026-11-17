@@ -36,6 +36,12 @@ class HeartAnalyzer:
     def baseline_ready(self) -> bool:
         return self.baseline is not None
 
+    def settle_baseline(self) -> None:
+        """Stage 0 ended early (Next stage / timeout): use the median of what was recorded,
+        so heart-jump comments still work for the rest of the session."""
+        if self.baseline is None and len(self.samples) >= 5:
+            self.baseline = statistics.median(b for _, b in self.samples)
+
     def push(self, bpm):
         now = self.clock.now()
         if bpm is None or bpm <= 0:

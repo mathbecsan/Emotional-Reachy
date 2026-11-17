@@ -39,18 +39,34 @@ def test_tts_failure_falls_back_to_mac_voice(monkeypatch):
     assert spoken == ["Hey. Eyes on me."]
 
 
-def test_tts_retries_without_language_code(monkeypatch):
+class FakeOut:
+    played = []
+
+    def __init__(self, **kw):
+        self.kw = kw
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+    def write(self, data):
+        FakeOut.played.append(len(data))
+
+
+def test_tts_streams_and_retries_without_language_code(monkeypatch):
     monkeypatch.setenv("ELEVENLABS_API_KEY", "ok")
     bodies = []
 
     def handler(request):
         bodies.append(json.loads(request.content))
+        assert request.url.path.endswith("/stream")
         return httpx.Response(400 if len(bodies) == 1 else 200, content=b"\x00\x00" * 160)
 
     voice = elevenlabs.ElevenLabsVoice(Clock())
     voice.client = httpx.Client(transport=httpx.MockTransport(handler))
-    played = []
-    monkeypatch.setattr(voice.sd, "play", lambda data, rate, device=None: played.append((len(data), rate)))
-    monkeypatch.setattr(voice.sd, "wait", lambda: None)
+    FakeOut.played = []
+    monkeypatch.setattr(voice.sd, "OutputStream", FakeOut)
     voice.say("Hola", "tl", 1.0, "curious")
-    assert "language_code" in bodies[0] and "language_code" not in bodies[1] and played == [(160, 16000)]
+    assert "language_code" in bodies[0] and "language_code" not in bodies[1] and sum(FakeOut.played) == 160

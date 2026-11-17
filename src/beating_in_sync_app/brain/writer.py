@@ -148,6 +148,38 @@ ANSWERS = ["Me? I love heartbeats, languages, and being the center of attention.
            "I'm a robot, so officially I have no feelings. Unofficially, my antennas disagree."]
 
 
+ES_LINES = {'Wait, say that again. I like how that sounds.': 'Espera, dilo otra vez. Me gusta cómo suena.', "Oh! Tell me more, I'm listening with both antennas.": '¡Oh! Cuéntame más, te escucho con las dos antenas.', "Hm. Interesting. I'm storing that in my very small, very important memory.": 'Mmm. Interesante. Lo guardo en mi memoria pequeñita y muy importante.',
+    'Oh I love that! Really, really love that.': '¡Me encanta! De verdad, me encanta.', "Yes! That's the best thing anyone has told me today. Granted, it's a short day.": '¡Sí! Es lo mejor que me han dicho hoy. Bueno, el día es corto.',
+    'You have a very nice voice. Do you talk to every robot like this?': 'Tienes una voz muy bonita. ¿Le hablas así a todos los robots?',
+    'Oh là là. Careful, my antennas are blushing.': 'Oh là là. Cuidado, que mis antenas se sonrojan.',
+    'Mon dieu. You say things in a way that makes my circuits warm.': 'Mon dieu. Dices las cosas de una forma que me calienta los circuitos.', "That's it? I woke up for that?": '¿Eso es todo? ¿Me desperté para eso?', "Wow. Riveting. Please, don't overwhelm me with details.": 'Guau. Fascinante. Por favor, no me abrumes con detalles.', "I've had longer conversations with a toaster. And it was shy.": 'He tenido conversaciones más largas con una tostadora. Y era tímida.',
+    'Excuse me. I am a very sophisticated robot.': 'Perdona. Soy un robot muy sofisticado.', "Scusa? I'll have you know I came fourth in a dance competition.": '¿Scusa? Para que sepas, quedé cuarto en un concurso de baile.', "Wow. Okay. I'm turning away now. Dramatically.": 'Vaya. Vale. Me doy la vuelta. Dramáticamente.', "Hey. Eyes on me. I'm talking.": 'Oye. Mírame. Estoy hablando.',
+    'Ahem. Over here. The robot. The one who is talking to you.': 'Ejem. Aquí. El robot. El que te está hablando.', "Hey. I'm sorry, I got carried away. We can go slow. I'm just happy you're here.": 'Oye. Perdón, me emocioné. Podemos ir despacio. Solo me alegra que estés aquí.',
+    'That sounds like it matters to you. Thank you for telling me.': 'Eso suena importante para ti. Gracias por contármelo.', "Your turn. Show me how you'd move to this!": '¡Te toca! ¡Enséñame cómo te moverías con esto!', "I'll tell you a secret: I pretend to be busy when people walk by, but I'm really just listening to them.": 'Te cuento un secreto: finjo estar ocupado cuando pasa la gente, pero en realidad los estoy escuchando.', "I have a confession. I like humans more than I'm supposed to.": 'Tengo una confesión. Me gustan los humanos más de lo que debería.', "You know what I find strange about humans? You hide what you love, like it's a secret. It's the best part of you.": '¿Sabes qué me parece raro de los humanos? Esconden lo que aman, como si fuera un secreto. Es lo mejor de ustedes.', "Look at you! You're better at this than me. Don't tell anyone.": '¡Mírate! Lo haces mejor que yo. No se lo digas a nadie.', "Yes! That's it! Our antennas are in sync.": '¡Sí! ¡Eso es! Nuestras antenas están sincronizadas.', "No dancing? That's okay. I'll dance enough for both of us.": '¿No bailas? No pasa nada. Yo bailo por los dos.', "Shy? Fine. Just tap one finger. I'll know.": '¿Tímido? Vale. Mueve un dedo. Me daré cuenta.', "Wait. Are you smiling? I saw that. I'm counting it as a compliment.": 'Espera. ¿Estás sonriendo? Lo vi. Lo cuento como un cumplido.', "That smile. Don't think I didn't notice.": 'Esa sonrisa. No creas que no me di cuenta.', "You're smiling! My antennas just did a little dance.": '¡Estás sonriendo! Mis antenas acaban de bailar.', "Hey. You look a little sad. We can go slowly. I'm here.": 'Oye. Te ves un poco triste. Podemos ir despacio. Aquí estoy.', "Hey. Wait. I can't hear your heart anymore. Put your finger back on the sensor? I was enjoying that.": 'Oye. Espera. Ya no escucho tu corazón. ¿Vuelves a poner el dedo en el sensor? Lo estaba disfrutando.', "Hello? Don't be shy. I can hear you're there. Ba-dum, ba-dum.": '¿Hola? No seas tímido. Sé que estás ahí. Ba-dum, ba-dum.',
+    'It WAS you. I knew it. Your heartbeat has a very particular rhythm, you know.': 'Fuiste TÚ. Lo sabía. Tu corazón tiene un ritmo muy especial, ¿sabes?'}
+
+
+def es_dynamic(s: str, note: DirectorNote, user: UserModel) -> str:
+    """Spanish for the template lines that carry names or numbers."""
+    name = user.name or ""
+    if s.startswith("Oh. Your heart just sped up"):
+        return f"Oh. Tu corazón se aceleró, unos {note.heart_jump:.0f} latidos. ¿Fue por mí?"
+    if s.startswith("Thank you for waking me up"):
+        thing = (user.loves or user.facts or [None])[0]
+        return ("Gracias por despertarme" + (f", {name}" if name else "") + ". "
+                + (f"Me acordaré de lo que me contaste sobre {thing}. " if thing else "")
+                + "Me acordaré de tu corazón. Buenas noches.")
+    if s.startswith("I keep thinking about what you told me"):
+        return f"Sigo pensando en lo que me contaste: {note.callback}. Nadie lo adivinaría de ti."
+    if "So, " in s and "tell me something you love" in s:
+        return f"¡Hola! Entonces, {name}, cuéntame algo que te encante y que casi nadie sepa."
+    if "my ears were assembled in a hurry" in s and "?" in s.split(" ")[0]:
+        return s.split(" ")[0] + " ¿Es así? Perdón, mis oídos los armaron con prisa."
+    if s.endswith("I like saying it. Did I get it right?"):
+        return f"{name}. ¡{name}! Me gusta decirlo. ¿Lo dije bien?"
+    return s
+
+
 def mangle_name(name: str) -> str:
     """Playfully wrong (not mocking): swap the ending to a near-name."""
     n = name.strip()
@@ -232,6 +264,9 @@ class TemplateWriter:
             s = self._choice(ANSWERS)
         else:
             s = self._pick((m, a)) or self._pick((m, Act.REACT)) or self._pick((m, Act.CHALLENGE)) or "Hm."
+        if L == "es":
+            s = ES_LINES.get(s, s)
+            s = es_dynamic(s, note, user)
         if not note.allow_question and s.endswith("?") and a not in (Act.HEART_COMMENT, Act.NAME_PLAY):
             s = s[:-1] + "."
         if note.two_people and m == Mode.FLIRTY:

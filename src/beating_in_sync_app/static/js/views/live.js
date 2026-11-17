@@ -226,6 +226,7 @@ export function liveView(outlet) {
         chart.addStage(e.t, e.stage);
         log.note(`Stage ${e.stage}${e.skipped ? " skipped" : ""}`, "line--stage");
         break;
+      case "stage_clock": timeline.set(e.stage, e.ts, e.seconds); break;
       case "baseline": baseline = e.bpm; chart.setBaseline(e.bpm); bpmMeta.textContent = `baseline ${Math.round(e.bpm || 0)}`; break;
       case "turn":
         log.turn(e);

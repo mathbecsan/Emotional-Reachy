@@ -68,9 +68,10 @@ class ElevenLabsVoice(MacVoice):
         logger.info("Reachy's voice: ElevenLabs %s on %s", self.voice_id,
                     "Reachy's speaker" if self.device is not None else "the default speaker")
 
-    def _tts(self, body):
-        return self.client.post(f"{API}/text-to-speech/{self.voice_id}", params={"output_format": "pcm_16000"},
-                                headers={"xi-api-key": api_key() or ""}, json=body)
+    def _stream(self, body):
+        return self.client.stream("POST", f"{API}/text-to-speech/{self.voice_id}/stream",
+                                  params={"output_format": "pcm_16000", "optimize_streaming_latency": "3"},
+                                  headers={"xi-api-key": api_key() or ""}, json=body)
 
     def say(self, text, lang="en", rate=1.0, mode=""):
         logger.info("REACHY (%s, %s)> %s", mode, lang, text)
@@ -80,24 +81,37 @@ class ElevenLabsVoice(MacVoice):
                                    "speed": max(0.7, min(1.2, rate))}}
         if lang and len(lang) == 2:
             body["language_code"] = lang
-        try:
-            r = self._tts(body)
-            if r.status_code in (400, 422) and "language_code" in body:  # model may not accept this code
-                body.pop("language_code")
-                r = self._tts(body)
-            r.raise_for_status()
-        except httpx.HTTPError as e:
-            logger.warning("ElevenLabs TTS failed (%s); using the macOS voice", e)
-            return super().say(text, lang, rate, mode)
-        pcm = self.np.frombuffer(r.content, dtype="<i2").astype("float32") / 32768.0
-        stereo = self.np.repeat(pcm[:, None], 2, axis=1)
-        try:
-            self.sd.play(stereo, self.RATE, device=self.device)
-            self.sd.wait()
-        except self.sd.PortAudioError as e:
-            logger.warning("Playback on device %s failed (%s); using the default speaker", self.device, e)
-            self.sd.play(stereo, self.RATE)
-            self.sd.wait()
+        for attempt in (0, 1):
+            try:
+                if self._play_stream(body):
+                    return
+            except httpx.HTTPStatusError as e:
+                if attempt == 0 and e.response.status_code in (400, 422) and "language_code" in body:
+                    body.pop("language_code")          # model may not accept this language code
+                    continue
+                logger.warning("ElevenLabs TTS failed (%s); using the macOS voice", e)
+            except (httpx.HTTPError, self.sd.PortAudioError) as e:
+                logger.warning("ElevenLabs TTS failed (%s); using the macOS voice", e)
+            break
+        return super().say(text, lang, rate, mode)
+
+    def _play_stream(self, body) -> bool:
+        """Play audio as it arrives: Reachy starts talking after the first chunk, not the whole sentence."""
+        np = self.np
+        with self._stream(body) as r:
+            if r.status_code >= 400:
+                r.read()
+                r.raise_for_status()
+            with self.sd.OutputStream(samplerate=self.RATE, channels=2, dtype="float32", device=self.device) as out:
+                carry = b""
+                for chunk in r.iter_bytes():
+                    chunk = carry + chunk
+                    usable = len(chunk) - len(chunk) % 2
+                    chunk, carry = chunk[:usable], chunk[usable:]
+                    if chunk:
+                        pcm = np.frombuffer(chunk, dtype="<i2").astype("float32") / 32768.0
+                        out.write(np.repeat(pcm[:, None], 2, axis=1))
+        return True
 
 
 class ElevenLabsListener:
@@ -105,7 +119,7 @@ class ElevenLabsListener:
     Lines typed in the web UI are accepted at the same time, so the facilitator
     can always step in if recognition misses something."""
 
-    def __init__(self, clock, samplerate=16000, start_rms=0.015, end_silence_s=1.0, max_s=20.0):
+    def __init__(self, clock, samplerate=16000, start_rms=0.012, end_silence_s=0.75, max_s=20.0):
         import numpy as np
         import sounddevice as sd
 
@@ -129,7 +143,7 @@ class ElevenLabsListener:
 
     def listen(self, timeout: float) -> Optional[Utterance]:
         np, sd = self.np, self.sd
-        time.sleep(0.35)  # let Reachy's own voice die out of the room before listening
+        time.sleep(0.2)  # let Reachy's own voice die out of the room before listening
         block = int(self.sr * 0.1)
         chunks, started, quiet, t0 = [], False, 0.0, time.monotonic()
         pre: list = []                     # keep 0.3 s before the trigger so first syllables aren't cut
@@ -138,8 +152,8 @@ class ElevenLabsListener:
             # Measure the room (Reachy's fan, ventilation) so the threshold sits above it.
             floor = [float(np.sqrt(np.mean(stream.read(block)[0] ** 2))) for _ in range(3)]
             self.noise = 0.7 * self.noise + 0.3 * min(floor) if self.noise else min(floor)
-            start_th = max(self.th, self.noise * 2.5)
-            end_th = max(self.th * 0.7, self.noise * 1.6)
+            start_th = max(self.th, self.noise * 1.8)   # people often speak from a metre or two away
+            end_th = max(self.th * 0.7, self.noise * 1.3)
             while True:
                 typed = self._typed()
                 if typed is not None and not started:

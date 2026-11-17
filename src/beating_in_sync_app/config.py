@@ -11,7 +11,7 @@ from dataclasses import dataclass, field, fields
 class Config:
     # --- Heart rate ---------------------------------------------------------
     baseline_window_s: float = 60.0      # stage 0: seconds of stable BPM needed
-    baseline_max_std: float = 6.0        # "stable" = std below this
+    baseline_max_std: float = 9.0        # "stable" = std below this (real MAX30102 readings swing ~±7 BPM)
     bpm_jump_threshold: float = 15.0     # jump vs. baseline that Reachy comments on
     bpm_short_jump: float = 10.0         # jump vs. the last 30 s (catches fast spikes mid-session)
     bpm_jump_cooldown_s: float = 25.0    # don't comment on every beat

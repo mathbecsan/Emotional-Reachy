@@ -53,3 +53,23 @@ def test_sad_face_gets_sincere(cfg):
     note = d.decide(3, 100, Signals(face_emotion="sad", face_conf=0.8), 0, analyze("I am fine", "en"),
                     Affect("sad", 0.8, -0.7, 0, "face"), UserModel())
     assert note.act == Act.FACE and note.mode == Mode.SINCERE
+
+
+def test_question_beats_persona_move_and_finger_nudge(cfg):
+    # From the room: "In which language were we speaking before?" got a scold; must be answered.
+    d, user = Director(cfg, random.Random(0)), UserModel(name="Dylan", language="es")
+    d.decide(4, 10, Signals(finger_on=False), 0, analyze("hola", "es"), Affect(), user)
+    note = d.decide(4, 30, Signals(finger_on=False), 0, analyze("In which language were we speaking before?", "en"),
+                    Affect(), user)
+    assert note.act == Act.ANSWER
+
+
+def test_room_complaints_have_answers():
+    for q, intent in [("Why are you talking in English?", "language_complaint"),
+                      ("So now you're being mean to us", "mean"), ("Answer something to me", "answer_me"),
+                      ("I have already repeated my name three times", "repeat_name")]:
+        assert answer(q, "es")[1] == intent
+
+
+def test_third_person_name():
+    assert analyze("he's saying that his name is Dylan", "en").name == "Dylan"

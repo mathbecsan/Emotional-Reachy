@@ -33,7 +33,7 @@ CUES = {
     "contradiction": r"(^no[,.!]|^no,? (it's|its|that's|es|eso|c'est)\b|^nope|not true|that's wrong|you're wrong|wrong\b|actually,? (no|it)|that's not|no es (verdad|cierto)|eso no|c'est faux|pas vrai|non [eè] vero|stimmt nicht|i disagree)",
     "laugh": r"(haha|hehe|lol|lmao|jaja|jeje|kkk|mdr|😂|🤣)",
     "discomfort": r"(stop it|that's mean|not funny|uncomfortable|i don't like (that|this|it)|too much|creepy|that's rude|leave me|please (don't|no)|no me gusta|me incomoda|c'est m[eé]chant|arr[eê]te|smettila|h[oö]r auf|awkward)",
-    "ask_robot": r"(\?|^\s*(what|why|how|who|where|when|do you|are you|can you|have you|qu[eé]|por qu[eé]|c[oó]mo|qui|quoi|pourquoi|est-ce|cosa|perch[eé]|was|warum|wie))",
+    "ask_robot": r"(\?|\b(answer|tell me|say something|resp[oó]nde|dime|contesta)\b|^\s*(what|why|how|who|where|when|do you|are you|can you|have you|qu[eé]|por qu[eé]|c[oó]mo|qui|quoi|pourquoi|est-ce|cosa|perch[eé]|was|warum|wie))",
     "love_talk": r"(i love|i really like|i'm (obsessed|passionate)|my favou?rite|me encanta|amo |me apasiona|j'adore|j'aime|adoro|ich liebe)",
     "bored_user": r"\b(boring|whatever|meh|i don't know|idk|no s[eé]|je sais pas|non lo so|wei[sß] nicht)\b",
 }
@@ -58,9 +58,11 @@ LANG_NAMES = {
 }
 
 NAME_PATTERNS = [
-    r"(?:my name is|i'm|i am|call me|it's|me llamo|mi nombre es|soy|je m'appelle|je suis|mi chiamo|sono|ich hei[sß]e|ich bin|meu nome [eé]|eu sou)\s+([A-ZÀ-ÿa-zà-ÿ'\-]+)",
+    r"(?:name is|name's|i'm|i am|call me|call him|call her|it's|me llamo|se llama|mi nombre es|su nombre es|soy|je m'appelle|je suis|mi chiamo|sono|ich hei[sß]e|ich bin|meu nome [eé]|eu sou)\s+([A-ZÀ-ÿa-zà-ÿ'\-]+)",
 ]
-NOT_NAMES = {"a", "an", "the", "fine", "good", "ok", "okay", "here", "not", "so", "very", "bien", "muy", "très", "really", "just"}
+NOT_NAMES = {"a", "an", "the", "fine", "good", "ok", "okay", "here", "not", "so", "very", "bien", "muy", "très", "really",
+             "just", "sorry", "doing", "going", "talking", "saying", "trying", "from", "in", "on", "at", "your", "his",
+             "her", "that", "this", "glad", "happy", "sure", "tired", "de", "un", "una", "el", "la", "yo", "aquí"}
 
 TOPIC_TAGS = {
     "music": r"(music|song|sing|guitar|piano|band|dance|m[uú]sica|canci[oó]n|bailar|musique|chanson|danser)",

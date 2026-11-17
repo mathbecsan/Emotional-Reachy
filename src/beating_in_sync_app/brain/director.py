@@ -137,7 +137,7 @@ class Director:
             self.finger_off_since = t
         finger_off_s = 0.0 if self.finger_off_since is None else t - self.finger_off_since
         if mode is None and 2 <= stage <= 4:
-            if finger_off_s >= self.cfg.finger_lost_s and t - self.last_nudge_t > 30:
+            if finger_off_s >= self.cfg.finger_lost_s and t - self.last_nudge_t > 30 and "ask_robot" not in cues:
                 self.last_nudge_t = t
                 mode, act, reason = Mode.CURIOUS, Act.NUDGE, f"finger off the sensors {finger_off_s:.0f}s"
             elif sig.hearts_in_sync and not self.sync_commented and stage >= 3:
@@ -158,6 +158,10 @@ class Director:
                         and ana.language not in user.languages_heard and self.last_lang is not None)
             if "discomfort" in cues:
                 mode, act, reason = (Mode.SINCERE, Act.REACT, "participant uncomfortable -> back off")
+            elif "ask_robot" in cues:
+                # A question always gets answered first (it was being lost behind other rules in the room).
+                mode = Mode.FLIRTY if stage == 4 and self.rng.random() < 0.4 else Mode.CURIOUS
+                act, reason = Act.ANSWER, "they asked Reachy something"
             elif jump >= 1:
                 mode = Mode.FLIRTY if (affect.valence >= 0 and stage >= 3 and not user.no_tease) else Mode.EXCITED
                 act, reason = Act.HEART_COMMENT, f"heart jumped +{jump:.0f} BPM"
@@ -177,9 +181,6 @@ class Director:
                 mode, act, reason = Mode.FLIRTY, Act.REACT, "compliment"
             elif "contradiction" in cues or ("laugh" in cues and stage == 4 and self.rng.random() < 0.6):
                 mode, act, reason = Mode.OFFENDED, Act.CHALLENGE, "contradicted / laughed at Reachy"
-            elif "ask_robot" in cues:
-                mode = Mode.FLIRTY if stage == 4 and self.rng.random() < 0.4 else Mode.CURIOUS
-                act, reason = Act.ANSWER, "they asked Reachy something"
             elif (silent or ana.words <= self.cfg.short_answer_words) and stage >= 3:
                 mode, act, reason = Mode.TEASING, Act.CHALLENGE, "silence / short answer"
             elif sig.bpm_flat and stage == 4:
@@ -191,7 +192,8 @@ class Director:
                 mode, act, reason = Mode.CURIOUS, Act.REACT, "default"
 
             # Stage 4 needs 2-3 *different* persona moves; nudge toward an unused one.
-            if stage == 4 and mode in (Mode.CURIOUS, Mode.EXCITED) and not affect.negative and "discomfort" not in cues:
+            if (stage == 4 and mode in (Mode.CURIOUS, Mode.EXCITED) and not affect.negative and "discomfort" not in cues
+                    and act != Act.ANSWER):
                 unused = [m for m in (Mode.TEASING, Mode.FLIRTY, Mode.SCOLDING)
                           if m not in self.stage4_moves and (m == Mode.FLIRTY or m in self.allowed_provocations)]
                 if unused:
