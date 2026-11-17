@@ -1,0 +1,33 @@
+---
+config:
+  layout: dagre
+---
+flowchart TB
+    P([Participant]) -- fingers --> Pulse[Arduino Nano + 2x MAX30102<br/>ir1,ir2 @ 100 Hz]
+    P -- voice --> Mic[Speech: Whisper / typed in UI]
+    P -- face --> Cam[Camera: FER + attention]
+
+    Pulse --> Beat[pulse_sensor.py<br/>beat detection from pulse_triple.py]
+    Beat --> Heart[heart.py<br/>baseline, jumps, flat, safety]
+    Heart --> Hub[(SignalHub)]
+    Cam --> Hub
+    Mic --> Text[text.py<br/>TER + cues + facts]
+
+    Hub --> Fuse[fusion.py<br/>face 0.6 + text 0.4 + heart arousal]
+    Text --> Fuse
+    Fuse --> Dir[director.py<br/>mode + act + safety rules]
+    Text --> User[(UserModel)]
+    User --> Dir
+
+    Dir --> Writer[writer.py<br/>Claude or offline templates]
+    Profile[profiles/*/profile.md] --> Writer
+    Writer --> Safety[safety.py<br/>red lines]
+    Safety --> Voice[voice.py]
+    Dir --> Body[moves.py<br/>keyframes + emotions library]
+    Body --> Robot[reachy_mini SDK]
+
+    Session[session.py<br/>stages 0-7] --- Dir
+    Session --> Log[(sessions/*.jsonl)]
+    Log --> Bus[events.py]
+    Bus --> UI[Web UI :7860<br/>live, replay, projection]
+    UI -- facilitator keys --> Session

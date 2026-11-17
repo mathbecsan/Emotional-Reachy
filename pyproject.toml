@@ -1,0 +1,61 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "beating_in_sync_app"
+version = "0.1.0"
+description = "Beating in Sync: a Reachy Mini that hears your heart and reacts to how you talk, look and feel."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "anthropic>=0.70",
+    "pydantic>=2",
+    "fastapi",
+    "uvicorn",
+    "python-dotenv",
+    "numpy",
+]
+
+[project.optional-dependencies]
+robot = ["reachy-mini>=1.11.0"]
+vision = ["opencv-python", "torch", "torchvision"]            # FER (kudosscience model) + attention
+text-emotion = ["transformers", "torch", "scikit-learn"]      # TER DistilBERT (kudosscience model)
+mic = ["faster-whisper", "sounddevice"]
+sensor = ["pyserial"]
+all = ["beating_in_sync_app[robot,vision,text-emotion,mic,sensor]"]
+
+[dependency-groups]
+dev = ["pytest", "httpx", "ruff"]
+
+[project.scripts]
+beating-in-sync = "beating_in_sync_app.main:main"
+
+[project.entry-points."reachy_mini_apps"]
+beating_in_sync_app = "beating_in_sync_app.main:BeatingInSyncApp"
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+include-package-data = true
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+beating_in_sync_app = ["static/**/*"]
+
+[tool.ruff]
+line-length = 119
+exclude = [".venv", "**/__pycache__"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "C4"]
+ignore = ["E501", "E701", "E702", "C408"]
+
+[tool.ruff.lint.isort]
+lines-after-imports = 2
+known-local-folder = ["beating_in_sync_app"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]

@@ -1,0 +1,21 @@
+[
+  {"cmd": "/hand on"},
+  {"say": "Haha yes, I think it was me", "lang": "en"},
+  {"say": "My name is Tomas", "lang": "en"},
+  {"say": "No, it's Tomas! With an A.", "lang": "en"},
+  {"say": "I feel most like myself in Spanish", "lang": "en"},
+  {"say": "Me encanta cocinar las recetas de mi abuela, sobre todo los tamales que hacía en Navidad", "lang": "es"},
+  {"say": "Sí, jaja, ella me enseñó todo cuando era niño", "lang": "es"},
+  {"say": "¿Y tú qué haces cuando estás solo?", "lang": "es"},
+  {"silence": true},
+  {"say": "No sé", "lang": "es"},
+  {"cmd": "/look away 4"},
+  {"say": "Perdón, perdón, estaba mirando mi teléfono", "lang": "es"},
+  {"say": "Eres muy gracioso, me caes bien", "lang": "es"},
+  {"cmd": "/bpm 22"},
+  {"say": "Jaja no es verdad, no eres tan sofisticado", "lang": "es"},
+  {"say": "Ok ok, lo siento robot", "lang": "es"},
+  {"cmd": "/move 0.7"},
+  {"say": "Jajaja me encanta esta canción", "lang": "es"},
+  {"say": "Adiós Reachy, buenas noches", "lang": "es"}
+]

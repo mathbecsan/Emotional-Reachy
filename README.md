@@ -1,2 +1,135 @@
-# Emotional-Reachy
-Beating in Sync Heart Beat Project
+# Beating in Sync — Emotional Reachy
+
+A Reachy Mini that hears your heart. Over a 15-minute session it wakes up when
+your heartbeat touches it, gets to know you in your own language, tells you its
+own stories, teases, flirts and sulks on cue from your words, your face, where
+you look and your pulse, then drops the act, says something sincere and goes
+back to sleep. Your heartbeat is then played back as colour and waves.
+
+Built from the team's three design docs (Interaction Protocol, Interview Guide,
+Reachy Personality and Behaviour), structured like
+[pollen-robotics/reachy_mini_conversation_app](https://github.com/pollen-robotics/reachy_mini_conversation_app),
+with emotion recognition from
+[kudosscience/fer_and_ter_model](https://github.com/kudosscience/fer_and_ter_model)
+and [introlab/emotion_recognition](https://github.com/introlab/emotion_recognition),
+and the pulse sensors / beat detection from the cs334_project
+(`pulse_double/pulse_double.ino`, `pulse_double/pulse_triple.py`).
+
+## Quick start
+
+```bash
+python3.12 -m venv .venv && source .venv/bin/activate
+pip install -e ".[robot,sensor]"          # add ,vision / ,mic / ,text-emotion as needed
+cp .env.example .env                       # put ANTHROPIC_API_KEY in it
+beating-in-sync                            # web UI at http://localhost:7860, simulated robot
+```
+
+| Run | Command |
+|---|---|
+| Rehearse in the browser, no hardware | `beating-in-sync` → Start session (Heart: Simulated) |
+| Real pulse sensors + real Reachy | `beating-in-sync --robot` → Heart: Arduino pulse sensors |
+| Check the beat pipeline without sensors | Heart: *Arduino pipeline, simulated signal* |
+| Terminal only, typed participant | `beating-in-sync --headless --listener console` |
+| Automated scripted participant | `beating-in-sync --headless --no-llm --scenario scenarios/demo_participant.json --scale 30` |
+| **Room preflight** (daemon, Arduino, Claude key) | `beating-in-sync --check` |
+| Find the Arduino's port | `beating-in-sync --list-ports` |
+| As a Reachy Mini app (dashboard) | installed via the `reachy_mini_apps` entry point `BeatingInSyncApp` |
+
+## The room setup (hardware)
+
+1. **Reachy Mini**: daemon running (`reachy-mini-daemon`), motors powered. Check
+   `curl localhost:8000/api/daemon/status` reports no error.
+2. **Pulse sensors**: Arduino Nano with two MAX30102 sensors (red lights on all
+   three boards), plugged in by USB. Firmware is already on the Nano; it prints
+   `ir1,ir2` per sample at 115200 baud. Sensor 1 = A4/A5, sensor 2 = D4/D5.
+3. **Close `pulse_triple.py` and the Arduino IDE serial monitor** — only one
+   program can read the port. The web UI shows both sensors' waveforms, so you
+   don't need the pygame windows during a session.
+4. Port: leave on *auto-detect* (it only accepts a free port that is actually
+   streaming `ir1,ir2`, and never touches the Reachy daemon's port) or pick it.
+
+### How the two sensors drive the session (`BIS_PULSE_MODE`)
+
+- **wake** (default): stage 0, the participant rests one finger on **sensor 1**
+  for the 60 s baseline. Stage 1, the UI prompts them to **press sensor 2** —
+  that pulse is what wakes Reachy. After that BPM is the mean of both sensors.
+- **one**: any sensor with a pulse wakes Reachy.
+- **two**: sensor 2 is a second person. Both fingers on → two people in the room
+  (Reachy flirts with one to make the other jealous) and, if both hearts settle
+  within 3 BPM, Reachy has its *"you're beating in sync"* moment.
+
+If the participant lets go of the sensors for 6 s mid-conversation, Reachy asks
+for their heartbeat back.
+
+## How Reachy decides what to do
+
+Every turn: **sense → decide → write → move + speak → listen**.
+
+- **Senses** (`perception/`): heart (baseline, +15 BPM jumps, flat stretches,
+  130 BPM safety stop), camera (FER emotion with the kudosscience CNN, looking
+  away, number of people, dancing), words (DistilBERT TER or a multilingual
+  lexicon; compliments, contradictions, laughter, discomfort, questions; name,
+  language, "something you love"). Face and text are fused 0.6/0.4 as in the
+  kudosscience fusion; heart adds arousal.
+- **Director** (`brain/director.py`) picks the **mode** (Sleepy, Curious,
+  Excited, Flirty, Teasing, Offended, Scolding, Sincere) and the **act**:
+  ask, react, tell a story, share a confession, call back something you said,
+  answer your question, comment on your heart, provoke, nudge, invite you to
+  dance, say goodbye. It enforces the Personality doc's rules in code: at most
+  2 provocations in a row, discomfort twice ends provocation, sad/scared
+  participants get gentleness, no teasing for participants who opted out — and
+  **at most 2 questions in a row**, so Reachy tells and reacts instead of
+  interrogating. Silence is answered with a story, not another question.
+- **Writer** (`brain/writer.py`): Claude (`claude-opus-5-5`, low effort, structured
+  output) writes the line in the participant's language from the Director's
+  brief, the user model and the conversation. Offline templates take over if
+  there is no API key, the call fails, or a line crosses a red line
+  (`brain/safety.py`: appearance, sexual content, insults, mocking language,
+  health claims from the heartbeat).
+- **Body** (`body/`): one keyframe gesture per mode (lean-in, nose-up turn
+  away, snap back…) plus recorded emotions from the Pollen emotions library,
+  `wake_up()` / `goto_sleep()` from the SDK, dancing in stage 5.
+
+Personalities live in `profiles/<name>/profile.md` (TOML front matter + persona
+prompt). `gentle` has no provocation stage. The safety rules are appended to
+every profile and can't be edited away.
+
+## Facilitator UI
+
+- **Live**: stage strip with protocol countdown, Reachy's mode/act and *why*,
+  heart chart (baseline band, stage bands, a dot per Reachy turn, ringed when
+  the heart triggered it), both pulse sensors, conversation log with detected
+  emotion and cues, what Reachy knows, and controls: Next stage, Scold now
+  (if the camera attention check is unreliable), **Pause** (= the stop word:
+  sincere goodbye, sleep). Participant lines can be typed (rehearsal / Wizard-of-Oz)
+  or come from the microphone.
+- **Sessions**: replay with the moves the participant actually saw (for the
+  post-interview) and which reactions came from their heartbeat (for the debrief).
+- **Projection**: stage 7 — the heartbeat as colour and waves, full screen (F).
+
+## Safety (from the protocol)
+
+The stop word **"pause"**, the Pause button, or BPM above 130 for 30 s stop the
+act immediately; stage 6 (sincere goodbye) always runs. Participants who'd
+rather not be teased skip stage 4. Any internal error also ends in the goodbye.
+
+## Session data
+
+`sessions/<time>_<participant>.jsonl`: every heart sample, stage change,
+utterance (with language, emotion, cues), turn (mode, act, reason, line, source)
+and facilitator command.
+
+## Development
+
+```bash
+pip install -e . pytest httpx ruff
+ruff check src tests && pytest -q
+```
+
+Layout: `src/beating_in_sync_app/` (`main.py`, `runtime.py`, `session.py`,
+`web.py`, `events.py`, `perception/`, `brain/`, `body/`, `static/`),
+`profiles/`, `scenarios/`, `tests/`. Architecture: `docs/scheme.mmd`.
+Tunable numbers: `config.py` (override with `BIS_<FIELD>` env vars).
+
+Stage 5 music: put one file per language in `assets/music/<lang>.mp3`
+(plus `default.mp3`).

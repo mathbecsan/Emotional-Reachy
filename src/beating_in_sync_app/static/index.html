@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="color-scheme" content="dark" />
+    <title>Beating in Sync</title>
+    <link rel="stylesheet" href="/static/style.css" />
+    <script type="module" src="/static/js/main.js"></script>
+  </head>
+  <body>
+    <header class="shell__header">
+      <a href="#/" class="shell__brand" aria-label="Live session">
+        <span class="shell__pulse" data-component="pulse-dot" aria-hidden="true"></span>
+        <span>Beating in Sync</span>
+      </a>
+      <nav class="shell__nav">
+        <a href="#/" data-nav="live">Live</a>
+        <a href="#/sessions" data-nav="sessions">Sessions</a>
+        <a href="#/projection" data-nav="projection">Projection</a>
+      </nav>
+      <span class="shell__conn" data-component="conn" title="Connection to the app">offline</span>
+    </header>
+    <main id="view-outlet" class="shell__outlet"></main>
+  </body>
+</html>
