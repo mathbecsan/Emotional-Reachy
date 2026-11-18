@@ -59,6 +59,8 @@ class PersonaShow:
         self.history: list[tuple[str, str]] = [(BASE, "start")]
         self._last_bridge: dict[str, str] = {}
         self._asked: dict[str, list[str]] = {}
+        self.activities: list[str] = []     # led one per persona switch (brain/activities.py)
+        self.style = ""                     # tone / reply length / activity list for the agent
 
     # ------------------------------------------------------------ state
     @property
@@ -176,6 +178,11 @@ class PersonaShow:
         q = self.question()
         return p.entrance, f"{p.glitch_in} {p.opener} {q}"
 
+    def next_activity(self) -> dict | None:
+        from .activities import ACTIVITIES
+
+        return ACTIVITIES[self.activities.pop(0)] if self.activities else None
+
     def closing(self, glitch: bool = True) -> str:
         lead = f"{PERSONAS[BASE].glitch_in} " if glitch else ""
         return f"{lead}{self.rng.choice(CLOSING)} {DEBRIEF}"
@@ -201,4 +208,6 @@ class PersonaShow:
                 + ("\n   Light touch: if they share a real problem, become Base Reachy and be kind." if p.fragile else ""))
         lines.append(f"Switch to the next persona after about {self.switch_every} exchanges, or when the Director "
                      "tells you to. Only use the personas listed above.")
+        if self.style:
+            lines.append("\n## Session style\n" + self.style)
         return "\n".join(lines)

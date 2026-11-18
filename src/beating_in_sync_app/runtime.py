@@ -14,7 +14,9 @@ import httpx
 from . import elevenlabs
 from .body.moves import ReachyMiniBody, SimBody
 from .body.voice import MacVoice, SimVoice
+from .brain.activities import ACTIVITIES, style_prompt, switch_every_for
 from .brain.persona_show import PersonaShow
+from .brain.personas import normalize_cast
 from .brain.user_model import UserModel
 from .brain.writer import ClaudeWriter, TemplateWriter
 from .clock import Clock
@@ -55,6 +57,11 @@ class SessionOptions:
     music: bool | None = None           # stage 5 dance; None = profile default
     motion_intensity: float = 1.0       # how big Reachy's gestures are (0.3 subtle - 1.3 dramatic)
     motion_speed: float = 1.0           # how fast they play (0.5 slow - 1.5 fast)
+    voice_id: str | None = None         # ElevenLabs voice; None = default (Callum)
+    tone: str = "playful"               # warm | playful | bold
+    chattiness: str = "normal"          # brief | normal | chatty
+    duration: str | None = None         # quick | standard | long -> sets switch_every
+    activities: list[str] | None = None # brain/activities.py keys
 
 
 class SessionRunner:
@@ -127,8 +134,13 @@ class SessionRunner:
         profile = load_profile(opts.profile)
         selection = opts.personas if opts.personas is not None else default_selection(profile)
         show, flirty = None, True
+        acts = [a for a in (opts.activities or []) if a in ACTIVITIES]
         if profile.kind == "personas":
-            show = PersonaShow(selection, opts.switch_every or profile.switch_every, rng, opts.no_tease)
+            n = len(normalize_cast(selection, opts.no_tease))
+            every = opts.switch_every or switch_every_for(opts.duration, n) or profile.switch_every
+            show = PersonaShow(selection, every, rng, opts.no_tease)
+            show.activities = [a for a in acts if a != "music_dance"]
+            show.style = style_prompt(opts.tone, opts.chattiness, acts)
             log.event("cast", 0.0, cast=show.cast, switch_every=show.switch_every)
         else:
             # Facilitator's pick of persona moves for stage 4 (Flirty + the provocations).
@@ -156,7 +168,7 @@ class SessionRunner:
         if (opts.voice == "elevenlabs" or opts.listener == "elevenlabs") and not has_el:
             self.bus.emit("error", message="No ELEVENLABS_API_KEY in .env: using the macOS voice and typed input.")
         if opts.voice == "elevenlabs" and has_el:
-            voice = elevenlabs.ElevenLabsVoice(clock)
+            voice = elevenlabs.ElevenLabsVoice(clock, voice_id=opts.voice_id)
         elif opts.voice in ("mac", "elevenlabs"):
             voice = MacVoice(clock)
         else:
@@ -167,13 +179,14 @@ class SessionRunner:
             try:
                 from .realtime import ensure_agent
 
-                agent_id = ensure_agent(profile)
+                agent_id = ensure_agent(profile, voice_id=opts.voice_id)
             except (httpx.HTTPError, KeyError, ValueError) as e:
                 logger.error("Could not set up the live agent (%s); using the scripted conversation.", e)
                 self.bus.emit("error", message=f"Live conversation unavailable ({e}); using scripted mode.")
         session = Session(cfg, clock, hub, heart, body, voice, writer, log, user, profile, sim_heart, rng,
                           realtime_agent=agent_id, show=show, heart_wake=opts.heart_wake,
-                          music=profile.music if opts.music is None else opts.music, flirty=flirty)
+                          music=("music_dance" in acts) if opts.activities is not None else
+                          (profile.music if opts.music is None else opts.music), flirty=flirty)
 
         if opts.listener == "scenario":
             listener = ScriptedListener(opts.scenario, session.on_command, clock)
@@ -224,16 +237,20 @@ class SessionRunner:
         self.robot = ReachyMini(media_backend="no_media", **({"robot_name": robot_name} if robot_name else {}))
         logger.info("Connected to Reachy Mini")
 
-    def preview_gesture(self, name: str) -> None:
+    def preview_gesture(self, name: str, intensity: float = 1.0, speed: float = 1.0) -> None:
         """Try a gesture from the persona catalog (on the running session's body, or a spare one)."""
+        from .body.gestures import GESTURES
+        from .body.moves import styled
+
+        seq = styled(GESTURES[name], max(0.3, min(1.3, intensity)), max(0.5, min(1.5, speed)))
         if self.session is not None and self.running:
-            self.session.body.play(name)
+            self.session.body.play(seq)
             return
         if self.robot is None:
             raise RuntimeError("Reachy isn't connected: press Connect Reachy on the Check setup page")
         if getattr(self, "_preview_body", None) is None:
             self._preview_body = ReachyMiniBody(self.robot, use_emotion_library=False)
-        self._preview_body.play(name)
+        self._preview_body.play(seq)
 
     def wait(self) -> None:
         if self.thread:

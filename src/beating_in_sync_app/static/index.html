@@ -10,18 +10,13 @@
   </head>
   <body>
     <header class="shell__header">
-      <a href="#/" class="shell__brand" aria-label="Home">
+      <a href="#/menu" class="shell__brand" aria-label="Main menu">
         <span class="shell__pulse" data-component="pulse-dot" aria-hidden="true"></span>
         <span>Beating in Sync</span>
       </a>
-      <nav class="shell__nav" aria-label="Steps">
-        <a href="#/check" data-nav="check"><span class="shell__step">1</span>Check setup</a>
-        <a href="#/new" data-nav="new"><span class="shell__step">2</span>New session</a>
-        <a href="#/session" data-nav="session"><span class="shell__step">3</span>Session</a>
-        <a href="#/results" data-nav="results"><span class="shell__step">4</span>Results</a>
-      </nav>
+      <nav class="crumbs" data-component="crumbs" aria-label="You are here"></nav>
       <div class="shell__right">
-        <a href="#/check" class="status-pills" data-component="status" title="Setup status: open Check setup"></a>
+        <a href="#/check" class="status-pills" data-component="status" title="Setup status: open the setup checklist"></a>
         <label class="debug-toggle" title="Show the technical panels (sensor signals, Director reasoning, simulators)">
           <input type="checkbox" data-component="debug" />
           <span class="switch__ui" aria-hidden="true"></span>
@@ -30,5 +25,6 @@
       </div>
     </header>
     <main id="view-outlet" class="shell__outlet"></main>
+    <div class="wipe" aria-hidden="true"><span></span><span></span><span></span></div>
   </body>
 </html>

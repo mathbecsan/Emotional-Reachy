@@ -158,21 +158,28 @@ one voice, so it feels like one robot losing control of its personality.
 
 **Running sessions? Start with [GUIDE.md](GUIDE.md)**, a step-by-step guide for anyone on the team.
 
-The app at http://localhost:7860 follows four steps:
+At http://localhost:7860, a start screen ("press any key") leads to a main menu
+(arrow keys + Enter), with wipe transitions between screens and a breadcrumb that
+always shows where you are.
 
-1. **Check setup**: Reachy (connect + test move), live pulse sensors (finger + BPM),
-   speaker, microphone (records and transcribes), camera, voice service. Each
-   failing row says what to do. `/api/check*` backs it.
-2. **New session**: a wizard (Experience → Personalities → Behaviour → Start)
-   with saved setups (`presets/*.json`). Behaviour covers gesture size and speed,
-   personality switch pace, teasing, heartbeat wake-up, face reactions and music.
-3. **Session**: Reachy's status, the personality strip with jump / next / reset /
-   close, the heart rate and the conversation.
-4. **Results**: replays with per-personality reactions; full-screen projection.
+- **Setup checklist**, one check per screen with immediate feedback and a fix for every failure:
+  1. connect Reachy (nod);
+  2. pulse sensors (finger + BPM, live);
+  3. camera & gaze (facing or turned away);
+  4. microphone & sounds (speech plus tagged sounds such as a ringtone);
+  5. speaker;
+  6. follow me (Reachy turns to the person);
+  7. range of motion.
 
-**Debug** (header switch) reveals the technical panels: stage timeline, heart
-chart, sensor waveforms, Director reasoning, user model, simulators, and the
-hardware options in the wizard.
+  Backed by `checks.py` and `/api/check/*`.
+- **New session**: Experience → Personalities (character select with Reachy in costume,
+  `components/avatar.js`) → Movement → Voice & tone (ElevenLabs voices with samples) → Length →
+  Activities (`brain/activities.py`) → Ready. Saved setups live in `presets/*.json`.
+- **Current session**: status, the current personality in costume, the line-up with jump / next /
+  reset / close, the heart rate and the conversation.
+- **Results**: replays with per-personality reactions; full-screen projection.
+
+**Debug** (header switch) reveals the technical panels and the hardware options.
 
 ## Safety (from the protocol)
 

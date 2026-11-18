@@ -168,3 +168,20 @@ def test_agent_cannot_reset_the_tour_on_its_own():
     rc.persona_command("reset")
     rc.switch_to("base", "agent")
     assert s.show.reset_mode
+
+
+def test_activities_tone_and_length_shape_the_session(tmp_path):
+    from beating_in_sync_app.brain.activities import switch_every_for
+
+    assert switch_every_for("quick", 4) == 5 and switch_every_for("long", 9) == 6 and switch_every_for(None, 4) is None
+    steps = [{"say": w} for w in ["hi", "I'm Sam", "bread", "yes", "no", "maybe", "ok", "sure", "fine", "bye"]]
+    ev = run_offline(tmp_path, steps, personas=["noir", "diva"], duration="quick", activities=["sing", "story"],
+                     tone="warm", chattiness="brief", heart_wake=False, voice_id="cgSgspJ2msm6clMCkdW9")
+    cast = next(e for e in ev if e["kind"] == "cast")
+    assert cast["switch_every"] == 6                                   # 240 s / 3 personalities / 13 s
+    acts = [e for e in ev if e["kind"] == "turn" and e["act"] == "activity"]
+    assert [a["why"] for a in acts][:2] == ["Sing a song", "Tell a story"]
+    show = PersonaShow(["base", "noir"])
+    from beating_in_sync_app.brain.activities import style_prompt
+    show.style = style_prompt("warm", "brief", ["sing"])
+    assert "warm and gentle" in show.agent_cast_prompt() and "Sing a song" in show.agent_cast_prompt()

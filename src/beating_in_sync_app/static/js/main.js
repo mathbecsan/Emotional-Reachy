@@ -1,7 +1,7 @@
-/** Hash router, the header's setup status and the Debug switch. */
+/** Router with wipe transitions, the header status pills and the Debug switch. */
 import { connect, onConnection, onEvent, api } from "./api.js";
-import { isDebug, setDebug, h } from "./ui.js";
-import { homeView } from "./views/home.js";
+import { isDebug, setDebug, h, setCrumbs } from "./ui.js";
+import { titleView, menuView } from "./views/menu.js";
 import { checkView } from "./views/check.js";
 import { builderView } from "./views/builder.js";
 import { liveView } from "./views/live.js";
@@ -11,48 +11,61 @@ import { personasView } from "./views/personas.js";
 import { loadPersonas } from "./personas.js";
 
 const outlet = document.getElementById("view-outlet");
-let cleanup = null;
-const ALIAS = { "": "home", build: "new", live: "session", sessions: "results", personas: "personalities" };
+const wipe = document.querySelector(".wipe");
+let cleanup = null, first = true;
+const ALIAS = { build: "new", live: "session", sessions: "results", personas: "personalities", home: "menu" };
 
-function route() {
+function render() {
   cleanup?.();
   cleanup = null;
   window.scrollTo(0, 0);
   const [, raw, arg] = (location.hash || "#/").split("/");
-  const view = ALIAS[raw ?? ""] ?? raw;
+  const view = ALIAS[raw] ?? (raw || "title");
   const a = arg && decodeURIComponent(arg);
-  document.querySelectorAll("[data-nav]").forEach((el) => el.classList.toggle("is-active", el.dataset.nav === view));
+  document.body.dataset.view = view;
   document.body.classList.toggle("is-projection", view === "projection");
-  if (view === "check") cleanup = checkView(outlet);
+  setCrumbs([]);
+  if (view === "check") cleanup = checkView(outlet, a);
   else if (view === "new") cleanup = builderView(outlet, a);
   else if (view === "session") cleanup = liveView(outlet);
   else if (view === "results" && a) cleanup = replayView(outlet, a);
   else if (view === "results") cleanup = sessionsView(outlet);
   else if (view === "projection") cleanup = projectionView(outlet, a);
   else if (view === "personalities") cleanup = personasView(outlet, a);
-  else cleanup = homeView(outlet);
+  else if (view === "menu") cleanup = menuView(outlet);
+  else cleanup = titleView(outlet);
 }
 
-// ---- header status: Reachy / Sensors / Voice + "session running"
+function route() {
+  const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  if (first || reduce) { first = false; render(); return; }
+  wipe.classList.remove("wipe--out");
+  wipe.classList.add("wipe--in");
+  setTimeout(() => {
+    render();
+    wipe.classList.remove("wipe--in");
+    wipe.classList.add("wipe--out");
+  }, 330);
+}
+
+// ---- header status pills
 const statusEl = document.querySelector("[data-component=status]");
-let running = false;
+export let lastCheck = null;
 async function refreshStatus() {
   try {
     const [c, st] = await Promise.all([api("/api/check"), api("/api/state")]);
-    running = st.running;
+    lastCheck = c;
     const pill = (ok, label) => h("span", { class: `pill ${ok ? "pill--ok" : "pill--bad"}` }, h("i", { "aria-hidden": "true" }), label);
     statusEl.replaceChildren(...[
-      running ? h("span", { class: "pill pill--live" }, h("i", { "aria-hidden": "true" }), "Session running") : null,
+      st.running ? h("span", { class: "pill pill--live" }, h("i", { "aria-hidden": "true" }), "Session running") : null,
       pill(c.daemon?.ok && c.robot?.ok, "Reachy"), pill(c.sensors?.ok, "Sensors"), pill(c.voice?.ok && c.audio?.ok, "Voice"),
     ].filter(Boolean));
-  } catch { /* offline: the connection indicator covers it */ }
+    window.dispatchEvent(new CustomEvent("statuschange", { detail: { check: c, state: st } }));
+  } catch { /* offline: the brand shows it */ }
 }
-
-onConnection((ok) => {
-  document.body.classList.toggle("is-offline", !ok);
-  if (ok) refreshStatus();
-});
-onEvent((e) => { if (e.kind === "session") { refreshStatus(); } });
+onConnection((ok) => { document.body.classList.toggle("is-offline", !ok); if (ok) refreshStatus(); });
+onEvent((e) => { if (e.kind === "session") refreshStatus(); });
+window.addEventListener("refreshstatus", refreshStatus);
 setInterval(refreshStatus, 15000);
 
 const dbg = document.querySelector("[data-component=debug]");

@@ -348,9 +348,11 @@ class RealtimeConversation:
                              f"with base, thank them warmly, say \"{DEBRIEF}\" and say goodbye. Do not ask a question.")
             return
         self.switch_pending = nxt.key
+        act = show.next_activity() if show.i >= 1 or len(show.cast) <= 2 else None
         self.direct(f"[Director] Switch persona now ({reason}): react to their last words in one short beat, then call "
                     f"reachy_switch_persona with {nxt.key}, say "
-                     f"\"{nxt.glitch_in}\" and the {nxt.name} opener with a question.")
+                    f"\"{nxt.glitch_in}\" and the {nxt.name} opener with a question."
+                    + (f" Then, as {nxt.name}, lead this activity: {act['agent']}" if act else ""))
 
     def persona_command(self, kind: str, key: str | None = None) -> None:
         """Facilitator buttons during a live persona session."""

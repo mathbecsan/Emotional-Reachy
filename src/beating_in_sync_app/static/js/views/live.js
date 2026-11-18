@@ -7,11 +7,30 @@ import { h, toast } from "../ui.js";
 import { api, command, say, onEvent } from "../api.js";
 import { MODES, LANGS, BPM_STOP } from "../constants.js";
 import { heartChart } from "../components/heart-chart.js";
-import { reachyFace } from "../components/reachy-face.js";
 import { stageTimeline } from "../components/stage-timeline.js";
 import { transcript } from "../components/transcript.js";
 import { sensorPanel } from "../components/sensor-panel.js";
 import { personaStrip } from "../components/persona-strip.js";
+import { avatar } from "../components/avatar.js";
+import { setCrumbs } from "../ui.js";
+
+// Beating in Sync modes shown as the closest costume
+const MODE_COSTUME = { sleepy: "grumpy", curious: "base", excited: "hype_bro", flirty: "smitten", teasing: "bored_teen",
+  offended: "melodramatic", scolding: "villain", sincere: "base" };
+
+function avatarFace() {
+  const el = h("div", { class: "live-avatar" });
+  let current = null;
+  const setMode = (mode) => {
+    const key = MODE_COSTUME[mode] || mode || "grumpy";
+    if (key === current) return;
+    current = key;
+    el.replaceChildren(avatar(key, { size: 150, color: MODES[mode]?.color || "#8a8fbf", animate: mode !== "sleepy" }));
+    el.classList.remove("live-avatar--pop"); void el.offsetWidth; el.classList.add("live-avatar--pop");
+  };
+  setMode("sleepy");
+  return { el, setMode, speak(on) { el.classList.toggle("is-speaking", on); }, listen(on) { el.classList.toggle("is-listening", on); } };
+}
 
 function idlePanel() {
   return h("section", { class: "card idle" },
@@ -19,7 +38,7 @@ function idlePanel() {
     h("p", { class: "muted" }, "Check the setup, then start a new session."),
     h("div", { class: "btn-row" },
       h("a", { class: "btn btn--primary btn--big", href: "#/new" }, "New session"),
-      h("a", { class: "btn btn--big", href: "#/check" }, "Check setup")));
+      h("a", { class: "btn btn--big", href: "#/check" }, "Setup checklist")));
 }
 
 const STATUS = {
@@ -65,7 +84,8 @@ function controls(getLang) {
 }
 
 export function liveView(outlet) {
-  const face = reachyFace();
+  setCrumbs([{ label: "Main menu", href: "#/menu" }, "Current session"]);
+  const face = avatarFace();
   const modeName = h("span", { class: "mode__name" }, "Asleep");
   const modeAct = h("span", { class: "mode__act" });
   const modeWhy = h("p", { class: "mode__why" }, "Waiting for a session.");

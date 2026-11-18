@@ -102,14 +102,17 @@ def mount_routes(app: FastAPI, runner: SessionRunner, bus: EventBus, cfg: Config
 
     @app.get("/api/personas")
     async def personas() -> dict:
-        return {"personas": catalog(), "base": BASE, "default_order": DEFAULT_ORDER, "gestures": EXPRESS_GESTURES}
+        from .brain.activities import ACTIVITIES
+
+        return {"personas": catalog(), "base": BASE, "default_order": DEFAULT_ORDER, "gestures": EXPRESS_GESTURES,
+                "activities": [{"key": k, **{x: v[x] for x in ("label", "icon", "text")}} for k, v in ACTIVITIES.items()]}
 
     @app.post("/api/gesture/{name}")
-    async def gesture(name: str) -> dict:
+    async def gesture(name: str, intensity: float = 1.0, speed: float = 1.0) -> dict:
         if name not in GESTURES:
             raise HTTPException(404, "unknown gesture")
         try:
-            runner.preview_gesture(name)
+            runner.preview_gesture(name, intensity, speed)
         except RuntimeError as e:
             raise HTTPException(409, str(e)) from e
         return {"status": "playing", "gesture": name}
@@ -172,6 +175,49 @@ def mount_routes(app: FastAPI, runner: SessionRunner, bus: EventBus, cfg: Config
         probe["thread"].start()
         return {"ok": True, "detail": "Listening to the sensors for 90 s"}
 
+    @app.post("/api/check/sounds")
+    async def check_sounds() -> dict:
+        idle()
+        try:
+            return await asyncio.to_thread(checks.sounds)
+        except Exception as e:  # PortAudio errors when no input device
+            return {"ok": False, "detail": f"Microphone error: {e}", "fix": "Check Reachy's USB audio connection."}
+
+    track = {"thread": None}
+
+    @app.post("/api/check/track")
+    async def check_track() -> dict:
+        idle()
+        t = track["thread"]
+        if t is not None and t.is_alive():
+            t.stop_event.set()
+            await asyncio.to_thread(t.join, 2)
+        robot = runner.robot if runner.robot_ok() else None
+        track["thread"] = checks.TrackProbe(bus, robot, cfg.camera_index)
+        track["thread"].start()
+        return {"ok": True, "following": robot is not None}
+
+    @app.post("/api/check/track/stop")
+    async def check_track_stop() -> dict:
+        t = track["thread"]
+        if t is not None:
+            t.stop_event.set()
+        return {"ok": True}
+
+    @app.post("/api/check/mobility")
+    async def check_mobility() -> dict:
+        idle()
+        robot = runner.robot if runner.robot_ok() else None
+        return await asyncio.to_thread(checks.mobility, robot, bus)
+
+    @app.get("/api/voices")
+    async def list_voices() -> list[dict]:
+        try:
+            return await asyncio.to_thread(checks.voices)
+        except Exception as e:  # offline / key problem: the picker shows the default voice only
+            logger.warning("voices unavailable: %s", e)
+            return []
+
     @app.post("/api/check/sensors/stop")
     async def check_sensors_stop() -> dict:
         t = probe["thread"]
@@ -220,10 +266,11 @@ def mount_routes(app: FastAPI, runner: SessionRunner, bus: EventBus, cfg: Config
         known = {f.name for f in fields(SessionOptions)}
         try:
             o = SessionOptions(**{k: v for k, v in opts.items() if k in known})
-            t = probe["thread"]
-            if t is not None and t.is_alive():   # free the Arduino port for the session
-                t.stop_event.set()
-                await asyncio.to_thread(t.join, 3)
+            for holder in (probe, track):            # free the Arduino port and the camera for the session
+                t = holder["thread"]
+                if t is not None and t.is_alive():
+                    t.stop_event.set()
+                    await asyncio.to_thread(t.join, 3)
             runner.start(o)
         except (RuntimeError, FileNotFoundError, TypeError) as e:
             raise HTTPException(409, str(e)) from e

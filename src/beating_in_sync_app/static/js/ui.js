@@ -42,3 +42,28 @@ export function setDebug(on) {
   document.body.classList.toggle("is-debug", on);
   window.dispatchEvent(new CustomEvent("debugchange", { detail: on }));
 }
+
+/** Breadcrumb in the header: setCrumbs(["Setup", "3 · Microphone"]). The first item links to the menu. */
+export function setCrumbs(items = []) {
+  const el = document.querySelector("[data-component=crumbs]");
+  if (!el) return;
+  el.replaceChildren(...items.flatMap((it, i) => {
+    const node = typeof it === "string" ? h("span", { class: i === items.length - 1 ? "crumbs__here" : "" }, it)
+      : h("a", { href: it.href }, it.label);
+    return i ? [h("span", { class: "crumbs__sep", "aria-hidden": "true" }, "›"), node] : [node];
+  }));
+}
+
+/** Screen-to-screen swap inside a view (no route change): slides the old content out and the new in. */
+export function swap(container, ...nodes) {
+  const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  if (reduce || !container.firstChild) { container.replaceChildren(...nodes); return; }
+  container.classList.remove("swap-in");
+  container.classList.add("swap-out");
+  setTimeout(() => {
+    container.replaceChildren(...nodes);
+    container.classList.remove("swap-out");
+    void container.offsetWidth;
+    container.classList.add("swap-in");
+  }, 160);
+}

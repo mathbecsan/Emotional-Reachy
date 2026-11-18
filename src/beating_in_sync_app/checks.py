@@ -182,3 +182,204 @@ class SensorProbe(threading.Thread):
         finally:
             ser.close()
             self.bus.emit("probe", done=True)
+
+
+# ---------------------------------------------------------------- voices
+_voices_cache: list | None = None
+
+
+def voices() -> list[dict]:
+    """ElevenLabs stock voices for the voice picker (cloned voices of team members are left out)."""
+    global _voices_cache
+    if _voices_cache is not None:
+        return _voices_cache
+    key = os.environ.get("ELEVENLABS_API_KEY")
+    if not key:
+        return []
+    data = _get("https://api.elevenlabs.io/v1/voices", {"xi-api-key": key}, timeout=8)
+    out = []
+    for v in data.get("voices", []):
+        if v.get("category") not in ("premade", "professional"):
+            continue
+        name, _, desc = v["name"].partition(" - ")
+        lab = v.get("labels") or {}
+        out.append({"id": v["voice_id"], "name": name.strip(), "description": desc.strip() or lab.get("descriptive", ""),
+                    "accent": lab.get("accent"), "gender": lab.get("gender"), "age": lab.get("age"),
+                    "preview": v.get("preview_url")})
+    _voices_cache = out
+    return out
+
+
+# ---------------------------------------------------------------- sounds
+def sounds(seconds: float = 6.0) -> dict:
+    """Record the room and report speech AND other sounds (ElevenLabs tags events like
+    (phone ringing), (music), (laughter)) plus the background noise level."""
+    import io
+    import re
+    import wave
+
+    import httpx
+    import numpy as np
+    import sounddevice as sd
+
+    from . import elevenlabs
+
+    dev = elevenlabs.find_device("Reachy Mini Audio", "input")
+    audio = sd.rec(int(16000 * seconds), samplerate=16000, channels=1, dtype="float32", device=dev)
+    sd.wait()
+    a = audio[:, 0]
+    frames = a[: len(a) // 1600 * 1600].reshape(-1, 1600)
+    rms = np.sqrt((frames ** 2).mean(axis=1)) + 1e-9
+    noise_db = float(20 * np.log10(np.percentile(rms, 20)))
+    peak_db = float(20 * np.log10(rms.max()))
+    levels = [round(float(min(1.0, r * 25)), 2) for r in rms]
+    speech, events = None, []
+    key = elevenlabs.api_key()
+    if key and peak_db - noise_db > 6:
+        buf = io.BytesIO()
+        with wave.open(buf, "wb") as w:
+            w.setnchannels(1)
+            w.setsampwidth(2)
+            w.setframerate(16000)
+            w.writeframes((np.clip(a, -1, 1) * 32767).astype("<i2").tobytes())
+        try:
+            r = httpx.post(f"{elevenlabs.API}/speech-to-text", headers={"xi-api-key": key}, timeout=30,
+                           data={"model_id": elevenlabs.STT_MODEL, "tag_audio_events": "true"},
+                           files={"file": ("room.wav", buf.getvalue(), "audio/wav")})
+            r.raise_for_status()
+            text = (r.json().get("text") or "").strip()
+            events = sorted({e.strip().lower() for e in re.findall(r"\(([^)]{2,40})\)", text)})
+            speech = re.sub(r"\([^)]*\)", "", text).strip() or None
+        except httpx.HTTPError as e:
+            logger.warning("sound test transcription failed: %s", e)
+    quiet = peak_db - noise_db <= 6
+    loud_room = noise_db > -35
+    parts = []
+    if speech:
+        parts.append(f"Speech: “{speech}”")
+    if events:
+        parts.append("Sounds: " + ", ".join(events))
+    if not parts:
+        parts.append("Nothing stood out from the background" if quiet else "Sound picked up, nothing recognised")
+    return {"ok": not quiet, "speech": speech, "events": events, "levels": levels,
+            "noise_db": round(noise_db), "peak_db": round(peak_db), "device": "Reachy" if dev is not None else "this computer",
+            "detail": " · ".join(parts),
+            "fix": ("The room is noisy: Reachy may mishear. Close doors or move away from fans." if loud_room else
+                    "Speak, clap or play a sound from your phone near Reachy, then test again." if quiet else "")}
+
+
+# ---------------------------------------------------------------- face following
+class TrackProbe(threading.Thread):
+    """Camera test: finds the person, tells whether they face Reachy or are turned away,
+    and (with the robot connected) turns Reachy's head to follow them. Runs up to 40 s."""
+
+    def __init__(self, bus, robot=None, index: int = 0, seconds: float = 40):
+        super().__init__(daemon=True, name="track-probe")
+        self.bus, self.robot, self.index, self.seconds = bus, robot, index, seconds
+        self.stop_event = threading.Event()
+
+    def run(self):
+        try:
+            import cv2
+        except ImportError:
+            self.bus.emit("track", ok=False, detail="OpenCV not installed", fix="pip install -e '.[vision]'", done=True)
+            return
+        cap = cv2.VideoCapture(self.index)
+        if not cap.isOpened():
+            self.bus.emit("track", ok=False, detail="The camera didn't open",
+                          fix="Allow the camera in System Settings › Privacy & Security › Camera, then try again.", done=True)
+            return
+        front = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
+        side = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_profileface.xml")
+        yaw = pitch = 0.0
+        t0, seen_front, seen_away, moved = time.monotonic(), 0, 0, 0.0
+        last_x = None
+        try:
+            while not self.stop_event.is_set() and time.monotonic() - t0 < self.seconds:
+                ok, frame = cap.read()
+                if not ok:
+                    time.sleep(0.05)
+                    continue
+                h_, w_ = frame.shape[:2]
+                gray = cv2.cvtColor(cv2.resize(frame, (w_ // 2, h_ // 2)), cv2.COLOR_BGR2GRAY)
+                faces = front.detectMultiScale(gray, 1.2, 5, minSize=(40, 40))
+                facing = len(faces) > 0
+                if not facing:
+                    faces = side.detectMultiScale(gray, 1.2, 5, minSize=(40, 40))
+                    if not len(faces):
+                        faces = side.detectMultiScale(cv2.flip(gray, 1), 1.2, 5, minSize=(40, 40))
+                if len(faces):
+                    x, y, fw, fh = max(faces, key=lambda f: f[2] * f[3])
+                    fx = (x + fw / 2) / (w_ / 2) * 2 - 1
+                    fy = (y + fh / 2) / (h_ / 2) * 2 - 1
+                    if last_x is not None:
+                        moved += abs(fx - last_x)
+                    last_x = fx
+                    seen_front += facing
+                    seen_away += not facing
+                    if self.robot is not None:      # follow: small steps toward the face
+                        yaw = max(-40.0, min(40.0, yaw - fx * 6))
+                        pitch = max(-20.0, min(20.0, pitch + fy * 3))
+                        try:
+                            from reachy_mini.utils import create_head_pose
+
+                            self.robot.set_target(head=create_head_pose(yaw=yaw, pitch=pitch, degrees=True))
+                        except Exception as e:  # robot link lost mid-test: keep reporting the camera
+                            logger.debug("follow failed: %s", e)
+                            self.robot = None
+                    state = "facing" if facing else "turned"
+                    self.bus.emit("track", ok=True, face=True, x=round(float(fx), 2), y=round(float(fy), 2), state=state,
+                                  following=self.robot is not None, left=round(self.seconds - (time.monotonic() - t0)),
+                                  facing_seen=seen_front, away_seen=seen_away, moved=round(moved, 1))
+                else:
+                    self.bus.emit("track", ok=True, face=False, state="none", following=self.robot is not None,
+                                  left=round(self.seconds - (time.monotonic() - t0)),
+                                  facing_seen=seen_front, away_seen=seen_away, moved=round(moved, 1))
+                time.sleep(0.08)
+        finally:
+            cap.release()
+            if self.robot is not None:
+                try:
+                    from reachy_mini.utils import create_head_pose
+
+                    self.robot.goto_target(head=create_head_pose(), duration=0.8)
+                except Exception as e:
+                    logger.debug("recenter failed: %s", e)
+            self.bus.emit("track", done=True, facing_seen=seen_front, away_seen=seen_away, moved=round(moved, 1))
+
+
+# ---------------------------------------------------------------- range of motion
+MOBILITY = [
+    ("look_left", "Look left", dict(yaw=40)), ("look_right", "Look right", dict(yaw=-40)),
+    ("look_up", "Look up", dict(pitch=-25)), ("look_down", "Look down", dict(pitch=25)),
+    ("tilt", "Tilt the head", dict(roll=25)), ("lift", "Stretch up", dict(z=15)),
+    ("turn_left", "Turn the body left", dict(body_yaw=150, yaw=150)), ("turn_right", "Turn the body right", dict(body_yaw=-150, yaw=-150)),
+    ("antennas", "Wave the antennas", dict(ant=(-60, 40))),
+]
+
+
+def mobility(robot, bus) -> dict:
+    """Run Reachy through its range of motion, step by step (the body turns +-150 deg: its limit is +-160,
+    so a full 360 isn't possible)."""
+    if robot is None:
+        return {"ok": False, "detail": "Reachy isn't connected", "fix": "Connect Reachy first (step 1 of the setup)."}
+    import numpy as np
+    from reachy_mini.utils import create_head_pose
+
+    done = []
+    try:
+        for key, label, p in MOBILITY:
+            bus.emit("mobility", step=key, label=label, status="moving")
+            head = create_head_pose(z=p.get("z", 0), roll=p.get("roll", 0), pitch=p.get("pitch", 0), yaw=p.get("yaw", 0),
+                                    mm=True, degrees=True)
+            ant = p.get("ant", (0, 0))
+            robot.goto_target(head=head, antennas=np.deg2rad(list(ant)), body_yaw=np.deg2rad(p.get("body_yaw", 0)),
+                              duration=1.2 if "body_yaw" in p else 0.7)
+            robot.goto_target(head=create_head_pose(), antennas=np.deg2rad([0, 0]), body_yaw=0.0, duration=0.8)
+            done.append(key)
+            bus.emit("mobility", step=key, label=label, status="done")
+    except Exception as e:  # SDK errors when the daemon drops mid-test
+        bus.emit("mobility", step=None, status="error")
+        return {"ok": False, "done": done, "detail": f"Stopped after {len(done)} of {len(MOBILITY)} moves",
+                "fix": f"Check that nothing blocks Reachy and that it's on in Reachy Mini Control. ({e})"}
+    return {"ok": True, "done": done, "detail": f"All {len(done)} moves played"}

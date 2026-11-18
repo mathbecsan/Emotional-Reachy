@@ -3,12 +3,14 @@
  * the moves the participant actually saw (for the post-interview questions),
  * and which reactions were triggered by their heartbeat vs. pre-scripted.
  */
+import { setCrumbs } from "../ui.js";
 import { h, fmtTime } from "../ui.js";
 import { api } from "../api.js";
 import { MODES, STAGES, PROVOCATIONS } from "../constants.js";
 import { heartChart } from "../components/heart-chart.js";
 
 export function sessionsView(outlet) {
+  setCrumbs([{ label: "Main menu", href: "#/menu" }, "Results"]);
   const list = h("ul", { class: "sessions__list" });
   outlet.replaceChildren(h("div", { class: "page page--narrow" },
     h("header", { class: "page__head" }, h("div", {}, h("h1", { class: "page__title" }, "Results"),
@@ -27,6 +29,7 @@ export function sessionsView(outlet) {
 }
 
 export function replayView(outlet, name) {
+  setCrumbs([{ label: "Main menu", href: "#/menu" }, { label: "Results", href: "#/results" }, name.split("_").pop()]);
   const chart = heartChart({ windowSecs: 0, height: 260 });
   const turns = h("ol", { class: "replay__turns" });
   const summary = h("div", { class: "replay__summary" });

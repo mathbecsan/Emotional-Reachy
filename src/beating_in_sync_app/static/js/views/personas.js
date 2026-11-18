@@ -6,9 +6,12 @@
 import { h, toast } from "../ui.js";
 import { api } from "../api.js";
 import { loadPersonas } from "../personas.js";
+import { avatar } from "../components/avatar.js";
+import { setCrumbs } from "../ui.js";
 
 export function personasView(outlet, focus) {
-  const root = h("div", { class: "personas" }, h("p", { class: "muted" }, "Loading…"));
+  setCrumbs([{ label: "Main menu", href: "#/menu" }, "Personalities"]);
+  const root = h("div", { class: "personas page" }, h("p", { class: "muted" }, "Loading…"));
   outlet.replaceChildren(root);
   let filter = "all", query = "";
 
@@ -37,7 +40,8 @@ export function personasView(outlet, focus) {
       detail.style.setProperty("--accent", p.color);
       detail.replaceChildren(
         h("div", { class: "pd__head" },
-          h("div", {}, h("h2", { class: "pd__name" }, p.name), h("p", { class: "pd__mood" }, p.mood)),
+          h("div", { class: "pd__who" }, avatar(p.key, { size: 96, color: p.color, animate: true }),
+            h("div", {}, h("h2", { class: "pd__name" }, p.name), h("p", { class: "pd__mood" }, p.mood))),
           h("button", { class: "icon-btn", type: "button", "aria-label": "Close", onclick: () => { detail.hidden = true; history.replaceState(null, "", "#/personas"); } }, "×")),
         h("blockquote", { class: "pd__sample" }, p.sample),
         h("dl", { class: "pd__facts" },
@@ -56,7 +60,7 @@ export function personasView(outlet, focus) {
             `Interrupted: “${p.barge_in}”`, `“I don't know”: “${p.dont_know}”`])),
           block("Reacting to what it sees", lines(Object.entries(p.camera).map(([k, v]) => `${k}: ${v.split("|")[0].replace(/_/g, " ")} + “${v.split("|")[1]}”`)))),
         h("div", { class: "btn-row pd__foot" },
-          h("a", { class: "btn btn--primary", href: "#/build" }, "Build a session"),
+          h("a", { class: "btn btn--primary", href: "#/new" }, "Create a session"),
           p.teases ? h("span", { class: "chip chip--warn" }, "teases: skipped for participants who opt out") : null,
           p.fragile ? h("span", { class: "chip" }, "switches to Base Reachy if someone shares a real problem") : null));
       detail.scrollIntoView({ block: "nearest", behavior: "smooth" });
@@ -71,6 +75,7 @@ export function personasView(outlet, focus) {
       grid.replaceChildren(...items.map((p) => h("button", {
         type: "button", class: "persona-card", style: { "--accent": p.color }, onclick: () => show(p),
       },
+      avatar(p.key, { size: 84, color: p.color }),
       h("span", { class: "persona-card__top" }, h("strong", {}, p.name), p.key === cat.base ? h("span", { class: "chip" }, "default") : null),
       h("span", { class: "persona-card__mood" }, p.mood),
       h("q", { class: "persona-card__line" }, p.sample),
@@ -85,7 +90,7 @@ export function personasView(outlet, focus) {
       h("div", { class: "builder__head" },
         h("div", {}, h("h1", { class: "page__title" }, "Personalities"),
           h("p", { class: "muted page__lede" }, "One robot, one voice, many moods. Every switch starts with a glitch line; “Reachy, reset” always brings back Base Reachy.")),
-        h("a", { class: "btn btn--primary", href: "#/build" }, "Build a session →")),
+        h("a", { class: "btn btn--primary", href: "#/new" }, "Create a session →")),
       h("div", { class: "catalog-tools" }, chipRow, search), detail, grid);
     draw();
     if (focus && cat.byKey[focus]) show(cat.byKey[focus]);

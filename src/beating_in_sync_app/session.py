@@ -388,6 +388,9 @@ class Session:
         self.body.play(GESTURES[show.glitch_gesture(self.rng)] + GESTURES[gesture])
         self.persona_event(reason)
         self.persona_say(text, None, "switch", why=f"glitch into {show.current.name} ({reason})")
+        act = show.next_activity()
+        if act:
+            self.persona_say(act["line"], show.current.gestures[0], "activity", why=act["label"])
         return True
 
     def persona_stages(self):

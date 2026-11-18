@@ -52,69 +52,65 @@ There are **three pieces**, and they start in this order:
 
 ---
 
-## The four steps in the web page
+## Finding your way in the web page
 
-The bar at the top always shows where you are:
-**1 Check setup → 2 New session → 3 Session → 4 Results**.
-The coloured dots at the top right (**Reachy · Sensors · Voice**) are green when
-that part is ready. Click them to open Check setup.
+- **Start screen:** press any key, or tap, to open the **main menu**.
+- **Main menu:** use ↑ ↓ (or the mouse) to choose, and Enter to open. The panel on
+  the right explains each option and shows its status (for example *"Needs attention: Reachy"*).
+- **The bar at the top** always shows where you are (for example *Main menu › New session › 4 · Voice & tone*)
+  and whether **Reachy · Sensors · Voice** are ready (green dots). Click the dots to open the setup checklist.
+- **Inside a step-by-step flow:** **Enter** = next, **Esc** = back. You can also click any step to jump to it.
 
-### 1 · Check setup (before every participant)
+### Setup checklist (before every participant)
 
-Each row tests one part. Green means ready; red tells you what to do.
+Seven short screens. The map on the left shows each step's result: **✓** passed, **!** needs fixing, **–** skipped.
+Every screen says what is being tested, gives feedback straight away, and, if
+something fails, explains what it means and what to try.
 
-| Row | Press | You should see |
+| Step | What you do | Passes when |
 |---|---|---|
-| **Reachy** | *Connect Reachy*, then *Test movement* | Reachy nods |
-| **Pulse sensors** | *Test sensors*, then rest a finger on each sensor | "Finger detected" and a heart rate after about 5 s |
-| **Speaker** | *Play a hello* | Reachy says hello out loud |
-| **Microphone** | *Record 4 seconds*, then speak | What you said, written out |
-| **Camera** | *Test camera*, sitting in front of Reachy | "1 face in view" |
-| **Voice service** | (automatic) | "Connected" and characters left |
+| **1 Connect Reachy** | Press *Connect Reachy*, watch it nod, answer *Yes* | Reachy nods |
+| **2 Pulse sensors** | Rest a finger lightly on each sensor and keep still | A heart rate appears (about 5 s) |
+| **3 Camera & gaze** | Look at Reachy, turn your head away, look back | All three ticks appear |
+| **4 Microphone & sounds** | *Record speech* and say a sentence; *Record a sound* and clap or play a ringtone | Reachy writes out what you said (and names the sound) |
+| **5 Speaker** | *Play Reachy's voice*, answer whether you heard it clearly | You answer *Yes* |
+| **6 Follow me** | Move to one side, then the other, then back to the middle | Reachy turns to follow you |
+| **7 Range of motion** | Clear the space, press *Start the moves*, answer whether it looked smooth | You answer *Yes* |
 
-Then press **Next: New session**.
+The **Summary** lists what's still needed. Reachy, sensors, microphone and speaker must pass before a real session.
 
-### 2 · New session (a 4-step wizard)
+- *Follow me* uses the camera: following a voice by sound alone isn't available yet.
+- Reachy's body turns up to 150° each way. Its limit is 160°, so a full 360° turn isn't possible.
 
-1. **Experience:** choose the kind of interaction.
-   - **Off-Brand Reachy**: a short interview where Reachy keeps glitching between personalities.
-   - **Beating in Sync**: the original 15-minute protocol (stages 0–7).
-   - **Gentle**: Beating in Sync without any teasing.
-   - Or click a **saved setup** to load everything in one go.
-2. **Personalities:** who Reachy becomes, and in what order.
-   - Tap a card on the right to add it. Use ↑ ↓ (or drag) to reorder, × to remove.
-   - *Base Reachy* always opens and closes, and is where Reachy returns after a reset.
-   - Cards marked **teases** are skipped if the participant doesn't want to be teased.
-   - *About each personality ↗* shows each one's lines and gestures, with a button to try a gesture on Reachy.
-3. **Behaviour:** how Reachy acts.
-   - **Size of gestures**: Subtle, Gentle, Normal or Dramatic.
-   - **Speed of gestures**: Slow, Normal or Fast.
-   - **Switch personality every**: how many replies before the next personality.
-   - **Teasing allowed**, **Wake up with a heartbeat**, **React to the face** (camera), **Music and dance**.
-4. **Start:** type the **participant ID** (for example `P07`), check the summary,
-   and press **Start session**. *Save setup* stores these choices under a name,
-   so every participant in a study condition gets exactly the same session.
+### New session (seven small screens)
 
-### 3 · Session
+1. **Experience:** *Off-Brand Reachy* (a short interview where Reachy glitches between personalities),
+   *Beating in Sync* (the original 15-minute protocol) or *Gentle* (no teasing). Or load a **saved setup**.
+2. **Personalities:**
+   - Tap Reachy's costumes to add or remove them. The number on each card is its place in the **line-up** below, and the ‹ › buttons reorder it.
+   - *Base Reachy* always opens and closes.
+   - **Teasing allowed** off skips the personalities marked *teases*.
+3. **Movement:** the size of gestures (Subtle → Dramatic) and their speed; whether Reachy follows the
+   participant's face. *Try it on Reachy* shows the result on the robot.
+4. **Voice & tone:** pick Reachy's voice (▶ plays a sample), the tone (Warm, Playful or Bold) and how much it talks.
+5. **Length:** Quick (about 4 min), Standard (8) or Long (12). Reachy adjusts how long each personality
+   lasts. **Wake up with a heartbeat** makes Reachy sleep and snore until a finger is on a sensor.
+6. **Activities:** music & dance, a made-up song, a story, a guessing game, copy-my-moves, the
+   heartbeat challenge. Reachy brings them up at personality switches, in that personality's style.
+7. **Ready:** the cast on stage, a summary (each line has *Change*), the **participant ID**, then
+   **▶ Start session**. *Save setup* stores everything under a name, so each study condition is identical.
 
-- **At the start:** the status says *"Asleep · ask the participant to rest a finger on a pulse sensor"*.
-- **Once the pulse is found:** it changes to *Snoring*, and then Reachy wakes up.
-- **During the conversation:**
-  - The **Personality now** strip shows who Reachy is and who comes next. Click a name to jump to it.
-  - **Next personality**: glitch into the next one now.
-  - **Reset to Base**: back to friendly Reachy for the rest of the session.
-  - **Close interview**: Reachy wraps up and says goodbye.
-  - **End session**: stop at any time. Reachy says a kind goodbye and sleeps.
-- **The participant can always say "Reachy, reset"** to bring back friendly Reachy.
-  Saying "that's not funny", or showing discomfort, does the same automatically.
+### Current session
 
-### 4 · Results
+- The status says what Reachy is doing (*Asleep · ask the participant to rest a finger…*, *Snoring*, *In conversation*).
+- The current personality appears as Reachy in costume.
+- **Personality now** shows the line-up. Click a name to jump to it, or use **Next personality**, **Reset to Base** or **Close interview**.
+- **End session** stops kindly at any time.
+- The participant can always say **"Reachy, reset"**.
 
-Pick a session to replay it: the conversation, the heart-rate graph, which
-personality was on when the heart rate rose, laughs, and any resets. *Project*
-shows the heartbeat as a full-screen visual for the end of the experience.
+### Results
 
----
+Replays: the conversation, the heart-rate graph, and how the participant reacted to each personality.
 
 ## Debug mode (for the team)
 
@@ -123,7 +119,7 @@ Switch **Debug** on (top right) to see the technical side:
 - the stage timeline, the live heart chart and both sensor waveforms;
 - why Reachy chose each reaction, and what it knows about the participant;
 - the simulators: a fake finger or heartbeat, a fake face, typing as the participant;
-- in **New session → Start**, the hardware options. For example, a *simulated
+- on the **Ready** screen of New session, the hardware options. For example, a *simulated
   heart* lets you rehearse without the sensors, and *typed only* lets you rehearse
   without speaking.
 
@@ -141,6 +137,8 @@ Switch it off again before a participant sits down.
 | Reachy doesn't hear the participant | **Check setup → Record 4 seconds.** Speak closer to Reachy. |
 | No voice at all | Check the Wi-Fi, then **Check setup → Voice service**. |
 | The page says "offline" | The app isn't running: start it again (step 2 above). |
+| The camera step says "No one in view" | Sit about an arm's length in front of Reachy, in good light (not in front of a window). |
+| The microphone step hears nothing | Speak from where the participant sits; check Reachy's USB cable. |
 | A session seems stuck | **End session**, then start a new one. Nothing is lost: the log is saved. |
 
 ---
