@@ -118,7 +118,8 @@ def mount_routes(app: FastAPI, runner: SessionRunner, bus: EventBus, cfg: Config
         return {"status": "playing", "gesture": name}
 
     # ------------------------------------------------------------ Check setup
-    probe = {"thread": None}
+    probe = {"thread": None, "all": []}   # every probe ever started, so none can be orphaned
+    probe_lock = asyncio.Lock()
 
     def idle() -> None:
         if runner.running:
@@ -166,13 +167,20 @@ def mount_routes(app: FastAPI, runner: SessionRunner, bus: EventBus, cfg: Config
     @app.post("/api/check/sensors")
     async def check_sensors(body: dict | None = None) -> dict:
         idle()
-        t = probe["thread"]
-        if t is not None and t.is_alive():         # let the previous test release the port first
-            t.stop_event.set()
-            await asyncio.to_thread(t.join, 5)
-        port = (body or {}).get("port") or cfg.heart_port
-        probe["thread"] = checks.SensorProbe(bus, port)
-        probe["thread"].start()
+        # One start at a time, and every older test stopped first: two readers on one serial port each
+        # get half the lines and both report "no data" (seen when the step was entered and retried at once).
+        async with probe_lock:
+            for t in probe["all"]:
+                if t.is_alive():
+                    t.stop_event.set()
+            for t in probe["all"]:
+                if t.is_alive():
+                    await asyncio.to_thread(t.join, 5)
+            probe["all"] = [t for t in probe["all"] if t.is_alive()]
+            port = (body or {}).get("port") or cfg.heart_port
+            probe["thread"] = checks.SensorProbe(bus, port)
+            probe["all"].append(probe["thread"])
+            probe["thread"].start()
         return {"ok": True, "detail": "Listening to the sensors for 90 s"}
 
     @app.post("/api/check/sounds")
@@ -184,29 +192,32 @@ def mount_routes(app: FastAPI, runner: SessionRunner, bus: EventBus, cfg: Config
             return {"ok": False, "detail": f"Microphone error: {e}", "fix": "Check Reachy's USB audio connection."}
 
     track = {"thread": None}
+    track_lock = asyncio.Lock()
 
     @app.post("/api/check/track")
     async def check_track() -> dict:
         idle()
-        t = track["thread"]
-        if t is not None and t.is_alive():
-            t.stop_event.set()
-            await asyncio.to_thread(t.join, 2)
-        robot = runner.robot if runner.robot_ok() else None
-        track["thread"] = checks.TrackProbe(bus, robot, cfg.camera_index)
-        track["thread"].start()
+        async with track_lock:                      # one camera test at a time
+            t = track["thread"]
+            if t is not None and t.is_alive():
+                t.stop_event.set()
+                await asyncio.to_thread(t.join, 4)
+            robot = runner.robot if runner.robot_ok() else None
+            track["thread"] = checks.TrackProbe(bus, robot, cfg.camera_index)
+            track["thread"].start()
         return {"ok": True, "following": robot is not None}
 
     repair_lock = asyncio.Lock()
 
     def stop_probes() -> list[str]:
         stopped = []
-        for name, holder in (("sensor test", probe), ("camera test", track)):
-            t = holder["thread"]
-            if t is not None and t.is_alive():
-                t.stop_event.set()
-                t.join(timeout=5)
-                stopped.append(name)
+        for name, threads in (("sensor test", probe["all"]), ("camera test", [track["thread"]])):
+            for t in threads:
+                if t is not None and t.is_alive():
+                    t.stop_event.set()
+                    t.join(timeout=5)
+                    if name not in stopped:
+                        stopped.append(name)
         return stopped
 
     @app.post("/api/repair")
@@ -324,8 +335,7 @@ def mount_routes(app: FastAPI, runner: SessionRunner, bus: EventBus, cfg: Config
 
     @app.post("/api/check/sensors/stop")
     async def check_sensors_stop() -> dict:
-        t = probe["thread"]
-        if t is not None:
+        for t in probe["all"]:
             t.stop_event.set()
         return {"ok": True}
 
@@ -370,8 +380,7 @@ def mount_routes(app: FastAPI, runner: SessionRunner, bus: EventBus, cfg: Config
         known = {f.name for f in fields(SessionOptions)}
         try:
             o = SessionOptions(**{k: v for k, v in opts.items() if k in known})
-            for holder in (probe, track):            # free the Arduino port and the camera for the session
-                t = holder["thread"]
+            for t in probe["all"] + [track["thread"]]:   # free the Arduino port and the camera for the session
                 if t is not None and t.is_alive():
                     t.stop_event.set()
                     await asyncio.to_thread(t.join, 3)

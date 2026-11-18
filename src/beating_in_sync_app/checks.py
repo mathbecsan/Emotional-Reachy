@@ -187,7 +187,7 @@ def camera_names() -> list[str]:
 class SensorProbe(threading.Thread):
     """Streams both pulse sensors to the UI (finger on/off, live BPM) for up to 90 s."""
 
-    def __init__(self, bus, port: str | None = None, seconds: float = 90):
+    def __init__(self, bus, port: str | None = None, seconds: float = 300):
         super().__init__(daemon=True, name="sensor-probe")
         self.bus, self.port, self.seconds = bus, port, seconds
         self.stop_event = threading.Event()
@@ -201,10 +201,18 @@ class SensorProbe(threading.Thread):
             self.bus.emit("probe", ok=False, detail="No Arduino streaming pulse data",
                           fix="Plug in the Arduino and close the Arduino IDE serial monitor.")
             return
-        try:
-            ser = serial.Serial(port, BAUD, timeout=0.5)
-        except (OSError, serial.SerialException) as e:
-            self.bus.emit("probe", ok=False, detail=f"Can't open {port}: {e}", fix="Close other programs using the port.")
+        ser = None
+        for _ in range(10):                  # exclusive: a second reader would split the lines between us
+            try:
+                ser = serial.Serial(port, BAUD, timeout=0.5, exclusive=True)
+                break
+            except (OSError, serial.SerialException) as e:
+                err = e
+                if self.stop_event.wait(0.5):
+                    return
+        if ser is None:
+            self.bus.emit("probe", ok=False, detail=f"The Arduino's port is held by another program ({err}).",
+                          fix="Close the Arduino IDE serial monitor or pulse_triple.py, then press Retry (or Repair).")
             return
         bufs, ans = [SampleBuffer(), SampleBuffer()], [BeatAnalyzer(), BeatAnalyzer()]
         time.sleep(2)  # the Nano resets when the port opens

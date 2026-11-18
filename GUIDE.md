@@ -71,7 +71,7 @@ something fails, explains what it means and what to try.
 | Step | What you do | Passes when |
 |---|---|---|
 | **1 Connect Reachy** | Press *Connect Reachy*. Reachy nods, then turns its body left and right; answer *Yes* | Head **and body** move (the body turn is measured) |
-| **2 Pulse sensors** | Rest a finger lightly on each sensor and keep still | A heart rate appears (about 5 s) |
+| **2 Pulse sensors** | Four guided checks: a finger on **sensor 1 alone**, on **sensor 2 alone**, **one person** with a finger on each sensor (both rates should match), and **two people**, one finger each (optional: *Only one person here: skip*) | The first three checks tick |
 | **3 Microphone & sounds** | *Record speech* and say a sentence; *Record a performance* and clap, sing, or play music (a phone recording works) | Reachy writes out what you said **and** names the performance (e.g. *piano*, *singing*, *clapping*) |
 | **4 Talk with Reachy** | *Start the chat*: Reachy asks three quick questions and wraps each one up | It understood at least 2 answers and you heard it clearly |
 | **5 Range of motion** | Clear the space, press *Run every move* (or *Run* one group) | All 24 moves play; body turns are measured |
@@ -161,6 +161,7 @@ Anything it can't fix is shown in orange, with what to do. If it's all green, ru
 | What you see | What to do |
 |---|---|
 | Reachy talks but doesn't move | The robot software stopped. Turn the robot on in **Reachy Mini Control**, then **Check setup → Connect Reachy**. |
+| "No signal from the sensors" while fingers are on them | The page reconnects to the sensors by itself once. If it still says so, press **↻ Reconnect sensors** (it restarts the reader), then **🔧 Repair**, which reads the Arduino for 3 seconds and says exactly what's wrong. Close the Arduino IDE serial monitor if it's open: only one program can read the sensors. |
 | Finger on the sensor, nothing happens | **Check setup → Test sensors.** "No data" or "Sensor 1 not found" means a loose wire: check SDA→A4, SCL→A5, power and ground, then unplug and replug the Arduino's USB. |
 | "Finger detected" but no heart rate | Press more lightly and keep still. Cold fingers take longer. |
 | Reachy doesn't hear the participant | **Check setup → Record 4 seconds.** Speak closer to Reachy. |

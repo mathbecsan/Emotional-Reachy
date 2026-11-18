@@ -123,6 +123,30 @@ def start_daemon(log_dir: Path, tries: int = 2) -> tuple[bool, str]:
     return False, f"It didn't start cleanly ({(st or {}).get('error') or 'no answer'}). See sessions/daemon.log."
 
 
+def _read_arduino(port: str, seconds: float = 3.0) -> tuple[int, str]:
+    """(valid "ir1,ir2" lines read, last error line) from the Arduino, opened exclusively."""
+    import serial
+
+    try:
+        ser = serial.Serial(port, 115200, timeout=0.5, exclusive=True)
+    except (OSError, serial.SerialException):
+        return 0, "its port is held by another program"
+    try:
+        time.sleep(2)                        # the Nano resets when the port opens
+        ser.reset_input_buffer()
+        n, bad, t0 = 0, "", time.monotonic()
+        while time.monotonic() - t0 < seconds:
+            line = ser.readline().decode(errors="ignore").replace("\x00", "").strip()
+            parts = line.split(",")
+            if len(parts) == 2 and all(p.isdigit() for p in parts):
+                n += 1
+            elif "not found" in line:
+                bad = line
+        return n, bad
+    finally:
+        ser.close()
+
+
 class Repair:
     def __init__(self, runner, bus, cfg, stop_probes):
         self.runner, self.bus, self.cfg, self.stop_probes = runner, bus, cfg, stop_probes
@@ -249,7 +273,15 @@ class Repair:
             self.report("sensors", "Pulse sensors", "failed", f"{busy[0]} is held by another program.",
                         "Close the Arduino IDE serial monitor or pulse_triple.py, then press Repair again.")
         else:
-            self.report("sensors", "Pulse sensors", "ok", f"Arduino on {free[0]}, free.")
+            n, bad = _read_arduino(free[0])
+            if n >= 50:
+                self.report("sensors", "Pulse sensors", "ok", f"Arduino on {free[0]}: {n} readings in 3 s.")
+            elif bad:
+                self.report("sensors", "Pulse sensors", "failed", f"The Arduino says: {bad}",
+                            "Check that sensor's 4 wires (SDA→A4, SCL→A5, power, ground), then unplug and replug the Arduino's USB.")
+            else:
+                self.report("sensors", "Pulse sensors", "failed", f"Only {n} readings in 3 s from {free[0]}.",
+                            "Unplug the Arduino's USB cable, wait 5 seconds, plug it back in, then press Repair again.")
 
         # 9. voice and ears
         self.working("audio", "Voice and microphone")

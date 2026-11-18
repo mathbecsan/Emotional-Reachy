@@ -11,7 +11,7 @@ import { speak, quiet, shortFix, praise, voiceOn, setVoice } from "../components
 
 const STEPS = [
   { key: "reachy", intro: "Let's make sure I can move. Press Connect Reachy and watch me.", title: "Connect Reachy", costume: "base", color: "#5cc8ff", why: "This app needs to reach the robot, and every motor must respond." },
-  { key: "sensors", intro: "Rest a finger lightly on a pulse sensor and keep still.", title: "Pulse sensors", costume: "smitten", color: "#ff5a6e", why: "The heartbeat wakes Reachy up and shapes its reactions." },
+  { key: "sensors", intro: "Four quick checks: sensor 1 alone, sensor 2 alone, one finger on each, and two different people.", title: "Pulse sensors", costume: "smitten", color: "#ff5a6e", why: "The heartbeat wakes Reachy up and shapes its reactions." },
   { key: "mic", intro: "Press Record speech and say a sentence to me. Then press Record a performance and clap, sing, or play some music.", title: "Microphone & sounds", costume: "tia", color: "#ff9a4d", why: "Reachy must understand speech, and recognise music, singing, claps and other sounds." },
   { key: "talk", intro: "Press Start the chat. I'll ask you three quick questions.", title: "Talk with Reachy", costume: "diva", color: "#ff6fb1", why: "A short chat: you hear Reachy clearly, and it understands your answers." },
   { key: "mobility", intro: "Clear the space around me, then press Run every move.", title: "Range of motion", costume: "villain", color: "#b98cff", why: "Head, antennas and body move freely, with nothing in the way." },
@@ -47,7 +47,7 @@ export function checkView(outlet, startKey) {
     h("button", { type: "button", class: "link-sm", onclick: () => { for (const k in results) delete results[k]; saveResults(results); show(0); } }, "Start over"),
     h("label", { class: "voice-toggle", title: "Reachy says each instruction, progress and problems out loud" },
       h("input", { type: "checkbox", checked: voiceOn(), onchange: (ev) => { setVoice(ev.target.checked); toast(ev.target.checked ? "Reachy's voice guide is on" : "Voice guide off"); } }),
-      h("span", { class: "switch__ui", "aria-hidden": "true" }), h("span", {}, "Voice guide"))),
+      h("span", { class: "switch__ui", "aria-hidden": "true" }), h("span", {}, "Voice guide", h("small", { class: "voice-toggle__note" }, "Always on in See & follow")))),
   stage));
 
   function drawMap() {
@@ -69,7 +69,7 @@ export function checkView(outlet, startKey) {
   }
 
   // ------------------------------------------------------------------ building blocks
-  function feedback(isLast = false) {
+  function feedback(isLast = false, always = false) {
     const box = h("div", { class: "feedback", hidden: true, role: "status" });
     const spoken = new Set();
     return {
@@ -78,8 +78,8 @@ export function checkView(outlet, startKey) {
         // Say results out loud too: progress, what went wrong, what to do next (once per message).
         if (!silent && state !== "wait" && !spoken.has(state + title)) {
           spoken.add(state + title);
-          if (state === "pass") speak(`${praise()} ${title}. ${isLast ? "Press Finish." : "Press Next to continue."}`, { important: true });
-          else speak(`Hmm, there's a problem. ${title}. ${shortFix(fix) || "Press Retry to try again, or Repair if it keeps failing."}`, { important: true });
+          if (state === "pass") speak(`${praise()} ${title}. ${isLast ? "Press Finish." : "Press Next to continue."}`, { important: true, always });
+          else speak(`Hmm, there's a problem. ${title}. ${shortFix(fix) || "Press Retry to try again, or Repair if it keeps failing."}`, { important: true, always });
         }
         box.hidden = false;
         box.dataset.state = state;
@@ -108,7 +108,7 @@ export function checkView(outlet, startKey) {
     });
     return b;
   };
-  const say = (text, important = false) => speak(text, { important });
+  const say = (text, important = false) => speak(text, { important, always: true });   // used by See & follow only
 
   /** Live camera picture, fetched one frame at a time (no connection is held open). */
   function liveVideo(vp) {
@@ -171,21 +171,69 @@ export function checkView(outlet, startKey) {
         return { el, set(s) { el.dataset.on = s.finger ? "1" : "0"; st.textContent = s.finger ? (s.bpm ? "Heartbeat found" : "Finger detected… keep still") : "No finger"; bpm.textContent = s.bpm ?? "––"; } };
       };
       const tiles = [tile(1), tile(2)];
-      area.append(h("p", { class: "instruct" }, "Rest a finger lightly on a sensor and keep still. Try both."), h("div", { class: "sensor-tiles" }, tiles[0].el, tiles[1].el));
-      const before = results.sensors;
+      // Guided checks, in order. Each must hold for ~2 s (8 readings) so a flicker doesn't count.
+      const CHECKS = [
+        { text: "Sensor 1 alone: one finger on sensor 1", how: "Rest one finger on sensor 1 only, and keep still.",
+          ok: ([a, b]) => a.bpm && !b.finger },
+        { text: "Sensor 2 alone: one finger on sensor 2", how: "Now move that finger to sensor 2 only.",
+          ok: ([a, b]) => b.bpm && !a.finger },
+        { text: "One person: a finger on each sensor", how: "Put one finger of each hand on the two sensors. Both should show about the same heart rate.",
+          ok: ([a, b]) => a.bpm && b.bpm && Math.abs(a.bpm - b.bpm) <= 12 },
+        { text: "Two people: one finger each (optional)", how: "Ask a second person to put a finger on one sensor while you keep yours on the other.",
+          ok: ([a, b]) => a.bpm && b.bpm, optional: true },
+      ];
+      const tasks = CHECKS.map((c) => task(c.text));
+      const how = h("p", { class: "instruct" });
+      const twoNote = h("p", { class: "muted small" });
+      let cur = 0, hold = 0, retried = false, gotData = false;
+      const setCur = (i) => {
+        cur = i;
+        tasks.forEach((t, j) => t.el.classList.toggle("is-current", j === i));
+        how.textContent = i < CHECKS.length ? CHECKS[i].how : "All sensor checks done.";
+      };
+      const finish = () => {
+        const required = tasks.slice(0, 3).every((t) => t.isDone());
+        if (required) {
+          fb.set("pass", tasks[3].isDone() ? "Both sensors work, for one person and for two" : "Both sensors work", tasks[3].isDone() ? "" : "The two-people check was skipped.");
+          setResult("sensors", "pass");
+        }
+      };
+      const restart = async (why) => {
+        fb.set("wait", why, "Restarting the sensor reader…");
+        await post("/api/check/sensors", {}).catch((e) => fb.set("fail", "Couldn't start the sensor test", e.message));
+      };
+      const skipTwo = h("button", { type: "button", class: "chip-btn", onclick: () => { tasks[3].done(false); setCur(4); finish(); } }, "Only one person here: skip");
+      area.append(how,
+        h("div", { class: "sensor-tiles" }, tiles[0].el, tiles[1].el),
+        h("ul", { class: "tasks" }, tasks.map((t) => t.el)), twoNote,
+        h("div", { class: "btn-row" },
+          h("button", { type: "button", class: "btn", title: "Stop and restart the sensor reader (fixes most 'no signal' problems)", onclick: () => { retried = false; restart("Reconnecting to the sensors…"); } }, "↻ Reconnect sensors"),
+          skipTwo));
+      setCur(0);
       fb.set("wait", "Connecting to the sensors…", "The Arduino restarts when it's opened: this takes about 3 seconds.");
-      const seen = new Set();
       const off = onEvent((e) => {
         if (e.kind !== "probe" || e.done) return;
         if (e.starting) return;
         if (!e.ok) {
-          fb.set("fail", e.detail?.includes("not found") ? "A sensor isn't wired correctly" : "No signal from the sensors", e.detail, e.fix);
-          if (before !== "pass") setResult("sensors", "fail");      // a re-test hiccup doesn't erase an earlier pass
+          // Self-recovery: the first time the readings stop, restart the reader once by itself.
+          if (!retried) { retried = true; restart("The sensors went quiet: reconnecting automatically…"); return; }
+          fb.set("fail", e.detail?.includes("not found") ? "A sensor isn't wired correctly" : "No signal from the sensors", e.detail,
+            `${e.fix} If the wires are fine, press ↻ Reconnect sensors.`);
+          if (results.sensors !== "pass") setResult("sensors", "fail");
           return;
         }
-        e.sensors?.forEach((s, i) => { tiles[i].set(s); if (s.bpm) seen.add(i); });
-        if (seen.size) { fb.set("pass", `Heartbeat detected on sensor ${[...seen].map((i) => i + 1).join(" and ")}`, seen.size < 2 ? "Try the other sensor too if you'll use both." : "Both sensors work."); if (results.sensors !== "pass") setResult("sensors", "pass"); }
-        else fb.set("wait", "Sensors connected. Waiting for a finger…", `${e.left}s left in this test.`);
+        if (!gotData) { gotData = true; fb.set("wait", "Sensors connected", "Follow the checks below, one at a time."); }
+        retried = false;                     // a later dropout gets its own automatic retry
+        e.sensors?.forEach((s, i) => tiles[i].set(s));
+        const [a, b] = e.sensors || [{}, {}];
+        if (a.bpm && b.bpm) twoNote.textContent = `Sensor 1: ${a.bpm} BPM · Sensor 2: ${b.bpm} BPM${Math.abs(a.bpm - b.bpm) <= 12 ? " (about the same heart)" : " (different hearts)"}`;
+        if (cur >= CHECKS.length) return;
+        hold = CHECKS[cur].ok(e.sensors || [{}, {}]) ? hold + 1 : 0;
+        if (hold >= 8) {
+          tasks[cur].done(); hold = 0;
+          setCur(cur + 1);
+          finish();
+        }
       });
       post("/api/check/sensors", {}).catch((e) => fb.set("fail", "Couldn't start the sensor test", e.message));
       return () => { off(); post("/api/check/sensors/stop").catch(() => {}); };
@@ -450,9 +498,10 @@ export function checkView(outlet, startKey) {
     }
     const s = STEPS[i];
     setCrumbs([{ label: "Main menu", href: "#/menu" }, "Setup checklist", `${i + 1} · ${s.title}`]);
-    const fb = feedback(i === STEPS.length - 1);
+    const voiceStep = s.key === "see";        // the person watches Reachy here, so Reachy always talks
+    const fb = feedback(i === STEPS.length - 1, voiceStep);
     const area = h("div", { class: "screen__area" });
-    speak(`Step ${i + 1} of ${STEPS.length}: ${s.title}. ${s.intro}`, { important: true });
+    speak(`Step ${i + 1} of ${STEPS.length}: ${s.title}. ${s.intro}`, { important: true, always: voiceStep });
     const next = h("button", { type: "button", class: "btn btn--primary" }, i === STEPS.length - 1 ? "Finish →" : "Next →");
     next.addEventListener("click", () => show(i + 1));
     navNext = () => { const ok = done(i); next.disabled = !ok && !isDebug(); next.title = next.disabled ? "Pass this check, or press Skip" : ""; };

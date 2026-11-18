@@ -5,17 +5,19 @@
  */
 import { api } from "../api.js";
 
-const KEY = "bis.voiceGuide";
+const KEY = "bis.voiceGuide.v2";      // new key: the old default (on) no longer applies
 let chain = Promise.resolve();
 let pending = 0;
 let last = { text: "", t: 0 };
 
-export function voiceOn() { try { return localStorage.getItem(KEY) !== "0"; } catch { return true; } }
+// Off by default: the screen shows everything. See & follow forces it on (the person watches Reachy, not the screen).
+export function voiceOn() { try { return localStorage.getItem(KEY) === "1"; } catch { return false; } }
 export function setVoice(on) { try { localStorage.setItem(KEY, on ? "1" : "0"); } catch { /* private */ } }
 
-/** Say `text` through Reachy. `important` lines are never dropped when several are waiting. */
-export function speak(text, { important = false } = {}) {
-  if (!voiceOn() || !text) return chain;
+/** Say `text` through Reachy. `important` lines are never dropped when several are waiting;
+ *  `always` speaks even when the voice guide is switched off (See & follow). */
+export function speak(text, { important = false, always = false } = {}) {
+  if ((!voiceOn() && !always) || !text) return chain;
   const now = Date.now();
   if (text === last.text && now - last.t < 10000) return chain;
   if (!important && pending >= 2) return chain;              // don't pile up chatter
