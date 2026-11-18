@@ -58,6 +58,8 @@ class HeartAnalyzer:
             span = now - self.samples[0][0]
             if span >= self.cfg.baseline_window_s and len(w) > 5 and statistics.pstdev(w) < self.cfg.baseline_max_std:
                 self.baseline = statistics.fmean(w)
+            elif span >= 1.5 * self.cfg.baseline_window_s:
+                self.settle_baseline()      # never stable enough (talking, moving): the median will do
 
         recent = self._window(5) or [bpm]
         cur = statistics.fmean(recent)

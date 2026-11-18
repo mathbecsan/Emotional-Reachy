@@ -39,8 +39,18 @@ def kinds(events):
     return out
 
 
+def test_wakes_at_the_first_heartbeat(tmp_path):
+    events = run_session(tmp_path)
+    seq = kinds(events)
+    assert seq.index("stage0") < seq.index("pulse") < seq.index("snore") < seq.index("stage1") < seq.index("wake")
+    pulse_t = next(e["t"] for e in events if e["kind"] == "sensor" and "snoring" in e["text"])
+    stage1_t = next(e["t"] for e in events if e["kind"] == "stage" and e["stage"] == 1)
+    assert stage1_t - pulse_t < 15                         # no 60 s baseline before waking
+    assert seq[-1] == "stage7"
+
+
 def test_pulse_then_snore_then_wake_then_dialogue(tmp_path):
-    seq = kinds(run_session(tmp_path))
+    seq = kinds(run_session(tmp_path, cfg=Config(sessions_dir=str(tmp_path), wake_on_first_heartbeat=False)))
     assert seq.index("stage0") < seq.index("pulse") < seq.index("snore") < seq.index("baseline")
     assert seq.index("baseline") < seq.index("stage1") < seq.index("wake") < seq.index("stage2")
     assert seq[-1] == "stage7"

@@ -118,7 +118,15 @@ class Session:
     def stage_over(self):
         return self.force_next or self.elapsed() > self.cfg.stage_time[self.stage]
 
+    def note_baseline(self):
+        """Log the resting heartbeat once it's known (after waking, when Reachy woke at the first beat)."""
+        if self.heart.baseline is not None and not getattr(self, "_baseline_logged", False):
+            self._baseline_logged = True
+            logger.info("heart baseline = %s BPM", round(self.heart.baseline, 1))
+            self.log.event("baseline", self.clock.now(), bpm=self.heart.baseline)
+
     def check_safety(self):
+        self.note_baseline()
         s = self.hub.snapshot()
         if s.bpm_overlimit_s >= self.cfg.bpm_stop_duration_s:
             self.stop_reason = f"BPM above {self.cfg.bpm_stop_limit:.0f} for {s.bpm_overlimit_s:.0f}s"
@@ -126,8 +134,10 @@ class Session:
             raise StopSession(self.stop_reason)
 
     def enter(self, stage):
+        self.note_baseline()
         self.stage, self.stage_t0, self.turns_in_stage, self.force_next = stage, self.clock.now(), 0, False
-        self.heart.collect_baseline = stage == 0
+        # The resting heartbeat is learned in stage 0, or right after waking when Reachy wakes at the first beat.
+        self.heart.collect_baseline = stage == 0 or (self.cfg.wake_on_first_heartbeat and self.heart.baseline is None)
         logger.info("=== STAGE %s ===", stage)
         self.log.event("stage", self.clock.now(), stage=stage, seconds=self.cfg.stage_time[stage] / self.clock.scale)
 
@@ -282,6 +292,8 @@ class Session:
             logger.exception("Session error in stage %s", self.stage)
             self.log.event("stop", self.clock.now(), reason=f"internal error: {e}", stage=self.stage)
         self.stop_reason = None          # stage 6 always runs, even after a stop
+        self.heart.settle_baseline()     # short session: use what was recorded as the resting heartbeat
+        self.note_baseline()
         if self.show is not None:
             self.persona_goodbye()
         else:
@@ -314,9 +326,9 @@ class Session:
         from .realtime import RealtimeConversation
 
         self.enter(1)
-        if not self.hub.snapshot().pulse_present:
+        if not self.woken():
             self.log.event("prompt", self.clock.now(), text=self.cfg.prompts["wake"])
-        while not self.hub.snapshot().pulse_present and not self.stage_over():
+        while not self.woken() and not self.stage_over():
             self.check_safety()
             self.listener_peek()
         self.body.wake_up()
@@ -399,9 +411,9 @@ class Session:
 
         self.enter(1)
         if self.heart_wake:
-            if not self.hub.snapshot().pulse_present:
+            if not self.woken():
                 self.log.event("prompt", self.clock.now(), text=self.cfg.prompts["wake"])
-            while not self.hub.snapshot().pulse_present and not self.stage_over():
+            while not self.woken() and not self.stage_over():
                 self.check_safety()
                 self.listener_peek()
         self.body.wake_up()
@@ -507,6 +519,11 @@ class Session:
 
     rt_closed_well = False
 
+    def woken(self) -> bool:
+        """The participant's heartbeat should wake Reachy now."""
+        sig = self.hub.snapshot()
+        return sig.pulse_present or (self.cfg.wake_on_first_heartbeat and sig.bpm is not None and sig.finger_on)
+
     def stage0_baseline(self):
         """Asleep and silent until a pulse arrives; then Reachy snores while the
         baseline is recorded, and wakes up once it has 60 s of stable heartbeat."""
@@ -527,6 +544,12 @@ class Session:
                 self.log.event("stage_clock", self.clock.now(), stage=0,
                                seconds=self.cfg.stage_time[0] / self.clock.scale)
                 self.body.play("snore", loop=True)
+                if self.cfg.wake_on_first_heartbeat:
+                    # One sleepy snore, then straight to waking up: the baseline is learned in the background.
+                    self.voice.say(self.rng.choice(self.SNORES), "en", 0.7, "sleepy")
+                    self.log.event("say", self.clock.now(), text="(snoring)", mode="sleepy", lang="en")
+                    self.log.event("sensor", self.clock.now(), text="Heartbeat felt: Reachy wakes up.")
+                    return
             if snoring and self.clock.now() - last_snore > 12:
                 self.voice.say(self.rng.choice(self.SNORES), "en", 0.7, "sleepy")
                 self.log.event("say", self.clock.now(), text="(snoring)", mode="sleepy", lang="en")
@@ -535,13 +558,14 @@ class Session:
         self.heart.settle_baseline()
         logger.info("heart baseline = %s BPM", self.heart.baseline and round(self.heart.baseline, 1))
         self.log.event("baseline", self.clock.now(), bpm=self.heart.baseline)
+        self._baseline_logged = True
 
     def stage1_wake(self):
         self.enter(1)
-        if not self.hub.snapshot().pulse_present:
+        if not self.woken():
             self.log.event("prompt", self.clock.now(), text=self.cfg.prompts["wake"])
         nudged = False
-        while not self.hub.snapshot().pulse_present and not self.stage_over():
+        while not self.woken() and not self.stage_over():
             self.check_safety()
             if not nudged and self.elapsed() > 25:
                 # Still asleep: a sleepy mumble invites the participant to press the sensor.

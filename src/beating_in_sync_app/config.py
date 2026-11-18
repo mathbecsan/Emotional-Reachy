@@ -12,6 +12,7 @@ from pathlib import Path
 class Config:
     # --- Heart rate ---------------------------------------------------------
     baseline_window_s: float = 60.0      # stage 0: seconds of stable BPM needed
+    wake_on_first_heartbeat: bool = True # wake the moment a heartbeat is felt; the baseline is learned after (False: snore through the baseline first)
     baseline_max_std: float = 9.0        # "stable" = std below this (real MAX30102 readings swing ~±7 BPM)
     bpm_jump_threshold: float = 15.0     # jump vs. baseline that Reachy comments on
     bpm_short_jump: float = 10.0         # jump vs. the last 30 s (catches fast spikes mid-session)

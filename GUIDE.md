@@ -8,8 +8,11 @@ session with a participant, and checking the results. No coding needed.
 ## What happens in a session
 
 1. Reachy is asleep. The participant rests a finger on a **pulse sensor**.
-2. Reachy hears the heartbeat, **snores** for about a minute while it learns the
-   participant's resting heart rate, then **wakes up**.
+2. The moment Reachy feels the heartbeat (a few seconds, once the sensor locks on),
+   it gives one sleepy snore and **wakes up**. It learns the participant's resting
+   heart rate during the first minute of the conversation. (To snore through that
+   minute before waking, as in the original protocol, set `wake_on_first_heartbeat = False`
+   in `config.py`.)
 3. Reachy talks with the participant. In the *Off-Brand Reachy* experience it
    slips between **personalities** (a bored teenager, a noir detective, a
    hype-bro…), reacting to what the participant says, their face and their heart.
@@ -104,7 +107,7 @@ Once a step has been reached it stays open, so you can go back and re-test witho
    participant's face. *Try it on Reachy* shows the result on the robot.
 4. **Voice & tone:** pick Reachy's voice (▶ plays a sample), the tone (Warm, Playful or Bold) and how much it talks.
 5. **Length:** Quick (about 4 min), Standard (8) or Long (12). Reachy adjusts how long each personality
-   lasts. **Wake up with a heartbeat** makes Reachy sleep and snore until a finger is on a sensor.
+   lasts. **Wake up with a heartbeat** makes Reachy sleep until a finger is on a sensor, then wake as soon as it feels the heartbeat.
 6. **Activities:** music & dance, a made-up song, a story, a guessing game, copy-my-moves, the
    heartbeat challenge. Reachy brings them up at personality switches, in that personality's style.
 7. **Ready:** the cast on stage, a summary (each line has *Change*), the **participant ID**, then
