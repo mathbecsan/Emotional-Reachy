@@ -52,6 +52,8 @@ IR_LINE = re.compile(r"^\d+,\d+$")
 WAVE_POINTS = 90        # waveform points sent to the UI per sensor
 EMIT_HZ = 5.0
 BOOT_S = 12.0           # allowed for the first line after the port opens (the board resets)
+MISSING_S = 4.0         # only "Sensor N not found" lines for this long = reset the board
+FAILS_BEFORE_HELP = 3   # restarts before asking for a power cycle / wiring check
 STALL_S = 3.0           # no lines for this long = the board hung: reset it by reopening
 
 
@@ -265,7 +267,9 @@ class ArduinoPulseSource(threading.Thread):
         self.analyzers = [BeatAnalyzer(), BeatAnalyzer()]
         self.stop_event = threading.Event()
         self.source_label = "simulated Arduino" if simulated else (port or "auto")
-        self.lines = 0                     # lines received (diagnostics)
+        self.lines = 0                     # readings received (diagnostics)
+        self.fails = 0                     # restarts since the last good reading
+        self.last_error = None
         self.wake_armed = mode != "wake"   # in "wake" mode sensor 2 only counts after the baseline
 
     # ---------------------------------------------------------------- serial
@@ -308,10 +312,12 @@ class ArduinoPulseSource(threading.Thread):
         return None
 
     def _reader(self, ser):
+        self.last_error = None
         try:
             self._read_lines(ser)
-        except Exception as e:  # USB unplugged or port lost: the analysis loop reconnects
-            logger.error("Pulse sensors disconnected: %s", e)
+        except Exception as e:  # USB unplugged, board hung, or a sensor not answering: run() resets the board
+            self.last_error = str(e)
+            logger.error("Pulse sensors: %s", e)
         finally:
             try:
                 ser.close()
@@ -319,30 +325,34 @@ class ArduinoPulseSource(threading.Thread):
                 pass
 
     def _read_lines(self, ser):
-        last_data, got = time.monotonic(), False
+        """Feed the buffers. Only real `ir1,ir2` readings count as data: the firmware can hang
+        (I2C) or loop printing "Sensor 2 not found" forever while USB stays open, so a stall of
+        either kind raises, and run() reopens the port, which resets the board."""
+        last_data, got, missing = time.monotonic(), False, None
         while not self.stop_event.is_set():
-            line = ser.readline()
-            if not line.strip():
-                limit = STALL_S if got else BOOT_S   # a freshly reset board can take ~10 s to start
-                # Watchdog: the Nano sometimes stops streaming (its I2C bus to a sensor hangs) while
-                # the USB link stays open, so nothing errors and the session waits forever. Reopening
-                # the port resets the board, which fixes it.
-                if self.simulated is None and time.monotonic() - last_data > limit:
-                    raise RuntimeError(f"no data from the Arduino for {limit:.0f} s")
-                continue
-            last_data, got = time.monotonic(), True
-            self.lines += 1
+            text = ser.readline().decode(errors="ignore").replace("\x00", "").strip()
             try:
-                vals = [int(p) for p in line.decode(errors="ignore").strip().split(",")]
+                vals = [int(p) for p in text.split(",")] if text else []
             except ValueError:
-                text = line.decode(errors="ignore").strip()
-                if "not found" in text:  # firmware: "Sensor 1 not found"
-                    logger.error("Arduino: %s", text)
-                    self.log.event("sensor", self.clock.now(), text=f"Arduino says: {text}. Check the wiring.")
+                vals = []
+            now = time.monotonic()
+            if len(vals) >= 2:
+                if not got:
+                    got = True
+                    self.fails = 0
+                    self.log.event("sensor", self.clock.now(), text="Pulse sensors streaming.")
+                last_data = now
+                self.lines += 1
+                for buf, v in zip(self.bufs, vals):
+                    buf.push(v, now)
                 continue
-            t = time.monotonic()
-            for buf, v in zip(self.bufs, vals):
-                buf.push(v, t)
+            if "not found" in text and missing is None:     # firmware: "Sensor 2 not found" (noted once)
+                missing = text.rstrip(".")
+            if self.simulated is None:
+                limit = STALL_S if got else (MISSING_S if missing else BOOT_S)
+                if now - last_data > limit:
+                    raise RuntimeError(f"{missing}: the Arduino sends no readings" if missing
+                                       else f"no data from the Arduino for {limit:.0f} s")
 
     # ---------------------------------------------------------------- analysis
     def run(self):
@@ -353,9 +363,19 @@ class ArduinoPulseSource(threading.Thread):
             reader = threading.Thread(target=self._reader, args=(ser,), daemon=True, name="arduino-serial")
             reader.start()
             self._analyse(reader)
-            if not self.stop_event.is_set():
-                self.log.event("sensor", self.clock.now(), text="Pulse sensors stopped sending: restarting them…")
-                self.stop_event.wait(0.5)
+            if self.stop_event.is_set():
+                break
+            self.fails += 1
+            err = self.last_error or "connection lost"
+            if self.fails == 1:
+                self.log.event("sensor", self.clock.now(), text=f"Pulse sensors stopped sending ({err}): restarting them…")
+            elif self.fails == FAILS_BEFORE_HELP:
+                # Restarting didn't help: this needs a hand (power cycle or a loose wire). Keep trying meanwhile.
+                self.log.event("sensor", self.clock.now(), text=(
+                    f"Pulse sensors not answering after {self.fails} restarts ({err}). Unplug the Arduino's USB for "
+                    "10 seconds (that switches the sensors off), check the wires of the sensor it names "
+                    "(sensor 1: A4/A5, sensor 2: D4/D5, plus power and ground), then plug it back in."))
+            self.stop_event.wait(0.5 if self.fails < FAILS_BEFORE_HELP else 5.0)
 
     def _analyse(self, reader):
         last_bpm_push = last_emit = 0.0

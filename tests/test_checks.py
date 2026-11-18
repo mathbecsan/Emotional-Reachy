@@ -134,8 +134,41 @@ def test_pulse_watchdog_resets_a_hung_arduino(monkeypatch):
             time.sleep(0.05)
             return b""
 
+    with pytest.raises(RuntimeError, match="no data"):
+        _bare_source(ps)._read_lines(HungSerial())
+
+
+class _Log:
+    bus = None
+
+    def __init__(self):
+        self.texts = []
+
+    def event(self, kind, t, **kw):
+        self.texts.append(kw.get("text", ""))
+
+
+def _bare_source(ps):
     src = ps.ArduinoPulseSource.__new__(ps.ArduinoPulseSource)
     src.simulated, src.stop_event = None, __import__("threading").Event()
-    src.bufs, src.lines = [ps.SampleBuffer(), ps.SampleBuffer()], 0
-    with pytest.raises(RuntimeError, match="no data"):
-        src._read_lines(HungSerial())
+    src.bufs, src.lines, src.fails = [ps.SampleBuffer(), ps.SampleBuffer()], 0, 0
+    src.log, src.clock = _Log(), type("C", (), {"now": lambda self: 0.0})()
+    return src
+
+
+def test_pulse_sensor_missing_loop_resets_the_board(monkeypatch):
+    """Firmware stuck printing "Sensor 2 not found" (no readings): reset, don't log every line."""
+    import pytest
+    from beating_in_sync_app.perception import pulse_sensor as ps
+
+    monkeypatch.setattr(ps, "MISSING_S", 0.2)
+
+    class Missing:
+        def readline(self):
+            time.sleep(0.01)
+            return b"Sensor 2 not found\n"
+
+    src = _bare_source(ps)
+    with pytest.raises(RuntimeError, match="Sensor 2 not found"):
+        src._read_lines(Missing())
+    assert src.log.texts == []                # nothing logged per line; run() reports it once

@@ -233,7 +233,7 @@ class SensorProbe(threading.Thread):
                     parsed = [int(x) for x in raw.split(",")]
                 except ValueError:
                     parsed = []
-                if vals and now - last_data > 3 and resets < 2:
+                if resets < 2 and ((vals and now - last_data > 3) or (problem and not vals and now - t0 > 4)):
                     # The board stopped streaming (I2C hang): reopen the port to reset it, quietly.
                     resets += 1
                     ser.close()
@@ -241,6 +241,7 @@ class SensorProbe(threading.Thread):
                     time.sleep(2)
                     ser.reset_input_buffer()
                     vals, t0 = [], time.monotonic()
+                    last_data, problem = t0, None
                     continue
                 if len(parsed) >= 2:            # a good line: the board works (forget an old "not found")
                     resets = 0 if now - last_data < 1 else resets

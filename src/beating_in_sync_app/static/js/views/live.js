@@ -244,15 +244,18 @@ export function liveView(outlet) {
       case "sound": log.note(`♫ ${e.text}`, "line--stage"); break;
       case "sensor":
         log.note(e.text, "line--prompt");
-        if (/Pulse sensors unavailable|disconnected/.test(e.text)) {
+        if (/Pulse sensors (unavailable|not answering)/.test(e.text)) {
+          const help = /not answering/.test(e.text);
           sensorWarn.hidden = false;
-          sensorWarn.replaceChildren(h("strong", {}, "The pulse sensors aren't connected, so Reachy can't feel the heartbeat yet. "),
-            h("span", {}, "It keeps retrying by itself. Check the Arduino's USB cable, and close the Arduino IDE if it's open. "),
+          sensorWarn.replaceChildren(h("strong", {}, help ? "A pulse sensor isn't answering, so Reachy can't feel the heartbeat. "
+              : "The pulse sensors aren't connected, so Reachy can't feel the heartbeat yet. "),
+            h("span", {}, help ? "Unplug the Arduino's USB for 10 seconds, check that sensor's wires, and plug it back in. Reachy keeps trying meanwhile. "
+              : "It keeps retrying by itself. Check the Arduino's USB cable, and close the Arduino IDE if it's open. "),
             h("button", { type: "button", class: "btn btn--small", onclick: () => window.dispatchEvent(new Event("repair")) }, "🔧 Repair"));
         }
-        if (/Pulse sensors connected/.test(e.text)) sensorWarn.hidden = true;
+        if (/Pulse sensors streaming/.test(e.text)) sensorWarn.hidden = true;
         if (/starts snoring/.test(e.text)) status.textContent = "Snoring · learning their resting heartbeat (about a minute)";
-        if (/unavailable|not found/i.test(e.text)) toast(e.text, "error");
+        if (/not answering/.test(e.text)) toast("A pulse sensor isn't answering: see the bar at the top.", "error");
         break;
       case "error": toast(e.message, "error"); break;
     }
