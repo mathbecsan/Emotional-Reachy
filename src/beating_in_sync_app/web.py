@@ -238,13 +238,14 @@ def mount_routes(app: FastAPI, runner: SessionRunner, bus: EventBus, cfg: Config
     async def check_mobility(body: dict | None = None) -> dict:
         idle()
         robot = runner.robot if runner.robot_ok() else None
+        await asyncio.to_thread(runner.wait_preview)
         return await asyncio.to_thread(checks.mobility, robot, bus, (body or {}).get("group"))
 
     @app.post("/api/check/body")
     async def check_body() -> dict:
         idle()
         robot = runner.robot if runner.robot_ok() else None
-        return await asyncio.to_thread(checks.body_check, robot)
+        return await asyncio.to_thread(checks.body_check, robot, runner.wait_preview)
 
     @app.get("/api/check/moves")
     async def check_moves() -> list[dict]:

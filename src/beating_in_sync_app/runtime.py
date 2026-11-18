@@ -237,6 +237,12 @@ class SessionRunner:
         self.robot = ReachyMini(media_backend="no_media", **({"robot_name": robot_name} if robot_name else {}))
         logger.info("Connected to Reachy Mini")
 
+    def wait_preview(self) -> None:
+        """Block until a test gesture (e.g. the setup nod) has finished playing."""
+        body = getattr(self, "_preview_body", None)
+        if body is not None:
+            body.wait()
+
     def preview_gesture(self, name: str, intensity: float = 1.0, speed: float = 1.0) -> None:
         """Try a gesture from the persona catalog (on the running session's body, or a spare one)."""
         from .body.gestures import GESTURES

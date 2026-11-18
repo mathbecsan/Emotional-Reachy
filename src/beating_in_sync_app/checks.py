@@ -526,11 +526,11 @@ def mobility(robot, bus, group: str | None = None) -> dict:
         if abs(delta) > 50:
             steps = turn_steps(state["body"], target_body, head_offset=max(-40.0, min(40.0, p.get("yaw", 0.0) - target_body)))
             for yaw, body in steps[:-1]:
-                robot.goto_target(head=create_head_pose(yaw=yaw, degrees=True), body_yaw=np.deg2rad(body), duration=dur / len(steps))
+                goto_when_free(robot, head=create_head_pose(yaw=yaw, degrees=True), body_yaw=np.deg2rad(body), duration=dur / len(steps))
             dur = dur / len(steps)
         yaw, body, pitch, roll = coordinate(p.get("yaw", 0.0), target_body, p.get("pitch", 0.0), p.get("roll", 0.0), delta)
         head = create_head_pose(x=p.get("x", 0), z=p.get("z", 0), roll=roll, pitch=pitch, yaw=yaw, mm=True, degrees=True)
-        robot.goto_target(head=head, antennas=np.deg2rad(list(p.get("ant", (0, 0)))), body_yaw=np.deg2rad(body), duration=dur)
+        goto_when_free(robot, head=head, antennas=np.deg2rad(list(p.get("ant", (0, 0)))), body_yaw=np.deg2rad(body), duration=dur)
         state["body"] = body
 
     try:
@@ -572,12 +572,28 @@ BODY_FIX = ("The body motor isn't turning. It usually stops itself after an over
             "Connect Reachy. If it still doesn't turn, the body motor or its cable may need attention from Pollen support.")
 
 
-def body_check(robot) -> dict:
+def goto_when_free(robot, tries: int = 12, **kw) -> None:
+    """goto_target, waiting while another move (e.g. the test nod) is still playing:
+    the robot software refuses overlapping moves with "a move is already running"."""
+    for i in range(tries):
+        try:
+            robot.goto_target(**kw)
+            return
+        except Exception as e:  # the SDK raises a generic error for this
+            if "already running" not in str(e) or i == tries - 1:
+                raise
+            time.sleep(0.25)
+
+
+def body_check(robot, wait_for=None) -> dict:
     """Turn the body 25° each way and measure it: catches a body motor that has shut itself off."""
     if robot is None:
         return {"ok": False, "detail": "Reachy isn't connected", "fix": "Press Connect Reachy first."}
     import numpy as np
     from reachy_mini.utils import create_head_pose
+
+    if wait_for is not None:          # let the nod finish first
+        wait_for()
 
     def body_now():
         j, _ = robot.get_current_joint_positions()
@@ -585,14 +601,17 @@ def body_check(robot) -> dict:
 
     try:
         start = body_now()
-        robot.goto_target(head=create_head_pose(yaw=25, degrees=True), body_yaw=np.deg2rad(25), duration=1.0)
+        goto_when_free(robot, head=create_head_pose(yaw=25, degrees=True), body_yaw=np.deg2rad(25), duration=1.0)
         time.sleep(0.2)
         left = body_now() - start
-        robot.goto_target(head=create_head_pose(yaw=-25, degrees=True), body_yaw=np.deg2rad(-25), duration=1.4)
+        goto_when_free(robot, head=create_head_pose(yaw=-25, degrees=True), body_yaw=np.deg2rad(-25), duration=1.4)
         time.sleep(0.2)
         right = body_now() - start
-        robot.goto_target(head=create_head_pose(), body_yaw=0.0, duration=1.0)
+        goto_when_free(robot, head=create_head_pose(), body_yaw=0.0, duration=1.0)
     except Exception as e:  # SDK errors when the daemon drops
+        if "already running" in str(e):
+            return {"ok": False, "detail": "Reachy was still busy with another move.",
+                    "fix": "Wait a second and press Test the motors again."}
         return {"ok": False, "detail": f"Couldn't move the body: {e}", "fix": BODY_FIX}
     moved = left - right
     if moved < 20:
