@@ -22,6 +22,7 @@ import queue
 import re
 import threading
 import time
+from collections import deque
 from pathlib import Path
 
 import httpx
@@ -201,6 +202,8 @@ class RealtimeConversation:
         self.sense_t: dict[str, float] = {}
         self.last_direct, self.last_direct_t, self.direct_retries = "", 0.0, 0
         self.sound = SoundWatcher(window_s=3.0, cooldown_s=2.0)   # claps, music, singing on the session mic
+        self.world: "deque" = deque(maxlen=30)                     # last 3 s of mic audio for the sound classifier
+        self.last_label = ""
         self.performing_since = 0.0
         self.last_music_t = 0.0
         self.last_clap_t = 0.0
@@ -244,6 +247,7 @@ class RealtimeConversation:
                     continue
                 for ev in self.sound.feed(data[:, 0]):
                     self._on_sound(ev)
+                self.world.append(data[:, 0].copy())
                 pcm = (np.clip(data[:, 0], -1, 1) * 32767).astype("<i2").tobytes()
                 self.send({"user_audio_chunk": base64.b64encode(pcm).decode()})
 
@@ -476,6 +480,36 @@ class RealtimeConversation:
             self.direct(f"[Reachy senses] They are clapping. React to it right away{who}: are they applauding you, "
                         "keeping a beat, or calling for attention? Respond playfully.")
 
+    def _hear_world(self) -> None:
+        """Every ~1.5 s, name what the mic hears (Piano, Singing, Applause, Laughter...) with the AudioSet classifier."""
+        from .perception.audio_tagger import AudioTagger
+
+        np = self.np
+        tagger = AudioTagger.get()
+        while not self.closed.is_set():
+            time.sleep(1.5)
+            if not tagger.ok or len(self.world) < 20 or time.monotonic() < self.speaking_until:
+                continue
+            a = np.concatenate(list(self.world))
+            if float(np.sqrt(np.mean(a ** 2))) < 0.01:            # silence: nothing to name
+                continue
+            tags = [t for t in tagger.tag(a) if t["score"] >= 0.25]
+            cats = {t["category"]: t["label"] for t in reversed(tags)}
+            if "speech" in cats and not ({"music", "singing"} & set(cats)):
+                continue                                         # plain conversation: the agent handles it
+            if "music" in cats or "singing" in cats:
+                self.last_label = cats.get("singing") or cats.get("music")
+                self._on_sound("music")
+            elif "clapping" in cats:
+                self._on_sound("clapping")
+            elif "laughter" in cats and time.monotonic() - getattr(self, "last_laugh_t", 0) > 30:
+                self.last_laugh_t = time.monotonic()
+                self.context(f"[Reachy senses] They are laughing.{' React as ' + self.show.current.name + '.' if self.show else ''}")
+            elif "phone" in cats and time.monotonic() - getattr(self, "last_phone_t", 0) > 60:
+                self.last_phone_t = time.monotonic()
+                self.direct(f"[Reachy senses] A phone ({cats['phone'].lower()}) just went off. React to it playfully"
+                            f"{' as ' + self.show.current.name if self.show else ''}.")
+
     def _performance_over(self) -> None:
         s = self.s
         secs = self.last_music_t - self.performing_since
@@ -484,7 +518,9 @@ class RealtimeConversation:
         if self.closing_t:
             return
         who = f" in persona as {self.show.current.name}" if self.show else ""
-        self.direct(f"[Director] They just performed for you (music or singing, about {secs:.0f} seconds). React to the "
+        label = getattr(self, "last_label", "")
+        what = label.lower() if label else "music or singing"
+        self.direct(f"[Director] They just performed for you ({what}, about {secs:.0f} seconds). React to the "
                     f"performance{who} with real enthusiasm or a playful review, mention something about it, "
                     "and ask them about it (what it was, where they learned it). You may call dance.")
 
@@ -635,7 +671,7 @@ class RealtimeConversation:
             self.send(init)
             threads = [threading.Thread(target=f, daemon=True, name=n) for f, n in
                        ((self._receiver, "rt-recv"), (self._speaker, "rt-speaker"), (self._mic, "rt-mic"),
-                        (lambda: self._senses(done), "rt-senses"))]
+                        (lambda: self._senses(done), "rt-senses"), (self._hear_world, "rt-world"))]
             for th in threads:
                 th.start()
             self.context("[Director] " + " ".join(facts))

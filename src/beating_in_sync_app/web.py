@@ -167,9 +167,9 @@ def mount_routes(app: FastAPI, runner: SessionRunner, bus: EventBus, cfg: Config
     async def check_sensors(body: dict | None = None) -> dict:
         idle()
         t = probe["thread"]
-        if t is not None and t.is_alive():
+        if t is not None and t.is_alive():         # let the previous test release the port first
             t.stop_event.set()
-            t.join(timeout=2)
+            await asyncio.to_thread(t.join, 5)
         port = (body or {}).get("port") or cfg.heart_port
         probe["thread"] = checks.SensorProbe(bus, port)
         probe["thread"].start()
@@ -240,6 +240,12 @@ def mount_routes(app: FastAPI, runner: SessionRunner, bus: EventBus, cfg: Config
         robot = runner.robot if runner.robot_ok() else None
         return await asyncio.to_thread(checks.mobility, robot, bus, (body or {}).get("group"))
 
+    @app.post("/api/check/body")
+    async def check_body() -> dict:
+        idle()
+        robot = runner.robot if runner.robot_ok() else None
+        return await asyncio.to_thread(checks.body_check, robot)
+
     @app.get("/api/check/moves")
     async def check_moves() -> list[dict]:
         return [{"key": k, "label": label, "group": g} for k, label, g, _ in checks.MOVES]
@@ -253,6 +259,18 @@ def mount_routes(app: FastAPI, runner: SessionRunner, bus: EventBus, cfg: Config
         if t is None or t.jpeg is None:
             raise HTTPException(404, "no frame yet")
         return Response(t.jpeg, media_type="image/jpeg", headers={"Cache-Control": "no-store"})
+
+    @app.post("/api/check/chat")
+    async def check_chat(body: dict) -> dict:
+        idle()
+        text = str(body.get("text", ""))[:240]
+        if say_lock.locked():
+            return {"ok": False, "detail": "Reachy is still talking"}
+        async with say_lock:
+            try:
+                return await asyncio.to_thread(checks.chat_turn, text, float(body.get("listen", 7)))
+            except Exception as e:  # audio device errors
+                return {"ok": False, "detail": f"Audio error: {e}", "fix": "Check Reachy's USB audio connection."}
 
     say_lock = asyncio.Lock()
 
@@ -382,7 +400,13 @@ def mount_routes(app: FastAPI, runner: SessionRunner, bus: EventBus, cfg: Config
             bus.unsubscribe(queue)
 
 
-def create_app(runner: SessionRunner, bus: EventBus, cfg: Config) -> FastAPI:
+def create_app(runner: SessionRunner, bus: EventBus, cfg: Config, warm_audio: bool | None = None) -> FastAPI:
+    import os
+
     app = FastAPI(title="Beating in Sync")
+    if warm_audio if warm_audio is not None else not os.environ.get("PYTEST_CURRENT_TEST"):                                   # load the sound classifier in the background
+        from .perception.audio_tagger import AudioTagger
+
+        AudioTagger.get()
     mount_routes(app, runner, bus, cfg)
     return app

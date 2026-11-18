@@ -762,3 +762,11 @@ body[data-view="title"] .shell__outlet, body[data-view="menu"] .shell__outlet { 
 .chip--sound { color: #0b0b10; background: var(--accent); border-color: var(--accent); font-weight: 700; font-size: 13px; }
 @media (max-width: 900px) { .follow-grid { grid-template-columns: 1fr; } }
 .arc__zone { padding-top: 54px; }
+.task.is-failed .task__box { background: var(--danger); border-color: var(--danger); }
+.task.is-failed { color: var(--danger); }
+.chatlog { list-style: none; margin: 0; padding: 12px; border-radius: 14px; background: #0f0f15; border: 1px solid var(--line); display: flex; flex-direction: column; gap: 8px; min-height: 70px; max-height: 260px; overflow-y: auto; }
+.chatlog:empty::before { content: "The conversation appears here."; color: var(--muted); font-size: 13px; }
+.chatlog li { display: flex; flex-direction: column; gap: 2px; max-width: 80%; padding: 8px 12px; border-radius: 12px; animation: fade-up 0.25s var(--ease-out); }
+.chatlog li b { font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); }
+.chatlog__reachy { align-self: flex-start; background: var(--panel-2); border-left: 3px solid var(--accent); }
+.chatlog__you { align-self: flex-end; background: #1f2430; }

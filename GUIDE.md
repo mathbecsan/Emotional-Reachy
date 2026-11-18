@@ -70,15 +70,15 @@ something fails, explains what it means and what to try.
 
 | Step | What you do | Passes when |
 |---|---|---|
-| **1 Connect Reachy** | Press *Connect Reachy*, watch it nod, answer *Yes* | Reachy nods |
+| **1 Connect Reachy** | Press *Connect Reachy*. Reachy nods, then turns its body left and right; answer *Yes* | Head **and body** move (the body turn is measured) |
 | **2 Pulse sensors** | Rest a finger lightly on each sensor and keep still | A heart rate appears (about 5 s) |
-| **3 Camera & gaze** | Watch yourself in the live picture; look at Reachy, turn your head away, look back. *Wrong camera?* shows each camera so you can pick Reachy's | All three ticks appear |
-| **4 Microphone & sounds** | *Record speech* and say a sentence; *Record a performance* and clap a rhythm, sing, or play music | Reachy writes out what you said **and** names the performance (clapping, music or singing) |
-| **5 Speaker** | *Play Reachy's voice*, answer whether you heard it clearly | You answer *Yes* |
-| **6 Follow me** | Press *Start the game*. Reachy tells you out loud where to go (in front, your left, your right, back to the middle); the banner and the map show it too | Reachy turns to follow you through all four positions |
-| **7 Range of motion** | Clear the space, press *Run every move* (or *Run* one group: head, expressions, height & lean, body, antennas) | You answer *Yes* after all 24 moves |
+| **3 Microphone & sounds** | *Record speech* and say a sentence; *Record a performance* and clap, sing, or play music (a phone recording works) | Reachy writes out what you said **and** names the performance (e.g. *piano*, *singing*, *clapping*) |
+| **4 Talk with Reachy** | *Start the chat*: Reachy asks three quick questions and wraps each one up | It understood at least 2 answers and you heard it clearly |
+| **5 Range of motion** | Clear the space, press *Run every move* (or *Run* one group) | All 24 moves play; body turns are measured |
+| **6 See & follow** | *Start*, then do what Reachy says: look at it, turn away, look back; stand up, walk far to your left (out of its view), far to your right, back to the middle | Reachy sees where you look and turns its **body** to follow you (it searches when you leave its view) |
 
-The **Summary** lists what's still needed. Reachy, sensors, microphone and speaker must pass before a real session.
+The **Summary** lists what's still needed. Reachy, sensors, microphone and the chat must pass before a real session.
+Once a step has been reached it stays open, so you can go back and re-test without locking the rest.
 
 - *Follow me* uses the camera: following a voice by sound alone isn't available yet.
 - Reachy's body turns up to 150° each way. Its limit is 160°, so a full 360° turn isn't possible.
@@ -141,6 +141,7 @@ Switch it off again before a participant sits down.
 | Reachy doesn't hear the participant | **Check setup → Record 4 seconds.** Speak closer to Reachy. |
 | No voice at all | Check the Wi-Fi, then **Check setup → Voice service**. |
 | The page says "offline" | The app isn't running: start it again (step 2 above). |
+| Reachy's head moves but its body doesn't turn | The body motor has stopped itself after an overload. Make sure nothing touches or blocks the base, then power-cycle Reachy: unplug its power for 10 seconds, plug it back in, turn it on in Reachy Mini Control, and press **Connect Reachy**. |
 | The camera step says "No one in view" | Sit about an arm's length in front of Reachy, in good light (not in front of a window). |
 | The microphone step hears nothing | Speak from where the participant sits; check Reachy's USB cable. |
 | A session seems stuck | **End session**, then start a new one. Nothing is lost: the log is saved. |

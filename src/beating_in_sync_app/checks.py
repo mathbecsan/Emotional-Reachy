@@ -200,19 +200,24 @@ class SensorProbe(threading.Thread):
         bufs, ans = [SampleBuffer(), SampleBuffer()], [BeatAnalyzer(), BeatAnalyzer()]
         time.sleep(2)  # the Nano resets when the port opens
         ser.reset_input_buffer()
-        t0 = last = time.monotonic()
-        problem = None
+        t0 = last = last_data = time.monotonic()
+        problem, problem_t = None, 0.0
+        vals = []
         try:
             while not self.stop_event.is_set() and time.monotonic() - t0 < self.seconds:
                 raw = ser.readline().decode(errors="ignore").replace("\x00", "").strip()
-                if "not found" in raw:
-                    problem = raw
-                try:
-                    vals = [int(x) for x in raw.split(",")]
-                except ValueError:
-                    vals = []
                 now = time.monotonic()
-                for b, v in zip(bufs, vals):
+                if "not found" in raw:
+                    problem, problem_t = raw, now
+                try:
+                    parsed = [int(x) for x in raw.split(",")]
+                except ValueError:
+                    parsed = []
+                if len(parsed) >= 2:            # a good line: the board works (forget an old "not found")
+                    vals, last_data = parsed, now
+                    if now - problem_t > 3:
+                        problem = None
+                for b, v in zip(bufs, parsed):
                     b.push(v, now)
                 if now - last >= 0.25:
                     last = now
@@ -222,11 +227,14 @@ class SensorProbe(threading.Thread):
                         a.update(ts, vs, now)
                         sensors.append({"n": i + 1, "finger": b.finger_on(now), "bpm": round(a.bpm) if a.has_signal and a.bpm else None,
                                         "raw": vals[i] if i < len(vals) else None})
-                    self.bus.emit("probe", ok=problem is None and bool(vals), port=port, sensors=sensors,
-                                  left=round(self.seconds - (now - t0)),
-                                  detail=problem or ("Streaming" if vals else "No data from the Arduino"),
-                                  fix="Check the sensor's 4 wires (SDA→A4, SCL→A5, power, ground), then replug the USB."
-                                  if problem or not vals else "")
+                    # Only call it a failure when it lasts: right after the port opens the board resets
+                    # and the first lines are garbage (that used to fail a re-test that was fine).
+                    stale = now - last_data > 4
+                    ok = not stale and problem is None
+                    self.bus.emit("probe", ok=ok, port=port, sensors=sensors, left=round(self.seconds - (now - t0)),
+                                  starting=now - t0 < 4 and not vals,
+                                  detail=problem or ("Streaming" if ok else "No data from the Arduino for 4 seconds"),
+                                  fix="" if ok else "Check the sensor's 4 wires (SDA→A4, SCL→A5, power, ground), then unplug and replug the Arduino's USB.")
         finally:
             ser.close()
             self.bus.emit("probe", done=True)
@@ -301,12 +309,24 @@ def sounds(seconds: float = 6.0) -> dict:
             speech = re.sub(r"[\(\[][^)\]]*[\)\]]", "", text).strip(" .,") or None
         except httpx.HTTPError as e:
             logger.warning("sound test transcription failed: %s", e)
+    from .perception.audio_tagger import AudioTagger, summarise
     from .perception.sound_events import analyse, describe
 
     local = analyse(a)
-    for e in describe(local):                       # claps / music / noise from the raw audio
-        if not any(w in " ".join(events) for w in e.split()[:1]):
-            events.append(e)
+    tagger = AudioTagger.get()
+    tags = tagger.tag(a) if tagger.ok and peak_db - noise_db > 4 else []
+    if tagger.ok:
+        # The classifier names non-speech sounds far better than the speech service's guesses.
+        events = [t["label"].lower() for t in tags if t["category"] not in ("speech", "other", "noise") and t["score"] >= 0.15]
+        cats = summarise([t for t in tags if t["score"] >= 0.15])
+        if "noise" in cats and not events:
+            events.append(cats["noise"].lower())
+    if local["claps"] >= 2 and not any("clap" in e or "applause" in e for e in events):
+        events.append(f"clapping ({local['claps']} claps)")
+    if not tagger.ok:
+        for e in describe(local):
+            if e not in events:
+                events.append(e)
     quiet = peak_db - noise_db <= 6 and not events
     loud_room = noise_db > -35
     parts = []
@@ -316,7 +336,8 @@ def sounds(seconds: float = 6.0) -> dict:
         parts.append("Sounds: " + ", ".join(events))
     if not parts:
         parts.append("Nothing stood out from the background" if quiet else "Sound picked up, nothing recognised")
-    return {"ok": not quiet, "speech": speech, "events": events, "levels": levels, "analysis": local,
+    return {"ok": not quiet, "speech": speech, "events": events, "levels": levels, "analysis": local, "tags": tags,
+            "classifier": "AudioSet classifier" if tagger.ok else ("loading…" if not tagger.ready.is_set() else "acoustic rules only"),
             "noise_db": round(noise_db), "peak_db": round(peak_db), "device": "Reachy" if dev is not None else "this computer",
             "detail": " · ".join(parts),
             "fix": ("The room is noisy: Reachy may mishear. Close doors or move away from fans." if loud_room else
@@ -347,9 +368,15 @@ class TrackProbe(threading.Thread):
             return
         front = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
         side = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_profileface.xml")
-        yaw = pitch = 0.0
+        look = body = pitch = 0.0          # where Reachy looks / where its body points (deg, + = Reachy's left)
+        last_dir, lost_since = 0.0, None
         t0, seen_front, seen_away, moved = time.monotonic(), 0, 0, 0.0
         last_x = None
+        np_ = __import__("numpy")
+        try:
+            from reachy_mini.utils import create_head_pose
+        except ImportError:
+            create_head_pose = None
         try:
             while not self.stop_event.is_set() and time.monotonic() - t0 < self.seconds:
                 ok, frame = cap.read()
@@ -362,8 +389,9 @@ class TrackProbe(threading.Thread):
                 facing = len(faces) > 0
                 if not facing:
                     faces = side.detectMultiScale(gray, 1.2, 5, minSize=(40, 40))
-                    if not len(faces):
-                        faces = side.detectMultiScale(cv2.flip(gray, 1), 1.2, 5, minSize=(40, 40))
+                    if not len(faces):        # profile facing the other way: detect on the mirror, map back
+                        flipped = side.detectMultiScale(cv2.flip(gray, 1), 1.2, 5, minSize=(40, 40))
+                        faces = [(gray.shape[1] - x - fw, y, fw, fh) for (x, y, fw, fh) in flipped]
                 preview = cv2.resize(frame, (480, int(480 * h_ / w_)))
                 if len(faces):
                     x, y, fw, fh = max(faces, key=lambda f: f[2] * f[3])
@@ -371,7 +399,10 @@ class TrackProbe(threading.Thread):
                     cv2.rectangle(preview, (int(x * k), int(y * k)), (int((x + fw) * k), int((y + fh) * k)),
                                   (168, 224, 123) if facing else (77, 201, 255), 3)
                 self.jpeg = cv2.imencode(".jpg", preview, [cv2.IMWRITE_JPEG_QUALITY, 65])[1].tobytes()
+                now = time.monotonic()
+                searching = False
                 if len(faces):
+                    lost_since = None
                     fx = (x + fw / 2) / (w_ / 2) * 2 - 1
                     fy = (y + fh / 2) / (h_ / 2) * 2 - 1
                     if last_x is not None:
@@ -379,27 +410,40 @@ class TrackProbe(threading.Thread):
                     last_x = fx
                     seen_front += facing
                     seen_away += not facing
-                    if self.robot is not None:      # follow: small steps toward the face
-                        yaw = max(-40.0, min(40.0, yaw - fx * 6))
-                        pitch = max(-20.0, min(20.0, pitch + fy * 3))
-                        try:
-                            from reachy_mini.utils import create_head_pose
-
-                            self.robot.set_target(head=create_head_pose(yaw=yaw, pitch=pitch, degrees=True))
-                        except Exception as e:  # robot link lost mid-test: keep reporting the camera
-                            logger.debug("follow failed: %s", e)
-                            self.robot = None
-                    state = "facing" if facing else "turned"
+                    step = -fx * 9                      # face right of centre -> turn right (negative)
+                    look = max(-160.0, min(160.0, look + step))
+                    if abs(step) > 1:
+                        last_dir = 1.0 if step > 0 else -1.0
+                    pitch = max(-20.0, min(20.0, pitch + fy * 3))
+                else:
+                    # Lost them: they probably walked out of view, so keep turning the way they went.
+                    lost_since = lost_since or now
+                    if last_dir and now - lost_since < 6 and abs(look) < 150:
+                        look = max(-155.0, min(155.0, look + last_dir * 4))
+                        searching = True
+                # The body follows once the head is more than 30 deg off it; the head stays within 45 deg of the body.
+                gap = look - body
+                if abs(gap) > 30:
+                    body = max(-150.0, min(150.0, body + max(-5.0, min(5.0, gap - (25 if gap > 0 else -25)))))
+                look = max(body - 45, min(body + 45, look))
+                if self.robot is not None and create_head_pose is not None:
+                    try:
+                        self.robot.set_target(head=create_head_pose(yaw=look, pitch=pitch, degrees=True), body_yaw=float(np_.deg2rad(body)))
+                    except Exception as e:  # robot link lost mid-test: keep reporting the camera
+                        logger.debug("follow failed: %s", e)
+                        self.robot = None
+                left = round(self.seconds - (now - t0))
+                if len(faces):
                     # Where the person stands, in degrees from Reachy's front (+ = the person's left).
-                    # Following recentres the face in the picture, so add the head turn back in.
-                    angle = fx * 30 - (yaw if self.robot is not None else 0.0)
-                    self.bus.emit("track", ok=True, face=True, x=round(float(fx), 2), y=round(float(fy), 2), state=state,
-                                  angle=round(float(angle)), head_yaw=round(yaw),
-                                  following=self.robot is not None, left=round(self.seconds - (time.monotonic() - t0)),
+                    # Following recentres the face in the picture, so add Reachy's own turn back in.
+                    angle = fx * 30 - (look if self.robot is not None else 0.0)
+                    self.bus.emit("track", ok=True, face=True, x=round(float(fx), 2), y=round(float(fy), 2),
+                                  state="facing" if facing else "turned", angle=round(float(angle)), head_yaw=round(look),
+                                  body=round(body), following=self.robot is not None, left=left,
                                   facing_seen=seen_front, away_seen=seen_away, moved=round(moved, 1))
                 else:
-                    self.bus.emit("track", ok=True, face=False, state="none", following=self.robot is not None,
-                                  left=round(self.seconds - (time.monotonic() - t0)),
+                    self.bus.emit("track", ok=True, face=False, state="search" if searching else "none", head_yaw=round(look),
+                                  body=round(body), following=self.robot is not None, left=left,
                                   facing_seen=seen_front, away_seen=seen_away, moved=round(moved, 1))
                 time.sleep(0.08)
         finally:
@@ -408,7 +452,7 @@ class TrackProbe(threading.Thread):
                 try:
                     from reachy_mini.utils import create_head_pose
 
-                    self.robot.goto_target(head=create_head_pose(), duration=0.8)
+                    self.robot.goto_target(head=create_head_pose(), body_yaw=0.0, duration=1.5)
                 except Exception as e:
                     logger.debug("recenter failed: %s", e)
             self.bus.emit("track", done=True, facing_seen=seen_front, away_seen=seen_away, moved=round(moved, 1))
@@ -438,9 +482,9 @@ MOVES = [
     ("sink", "Sink down", "Height & lean", _seq(dict(z=-15))),
     ("lean_forward", "Lean forward", "Height & lean", _seq(dict(x=15, pitch=10))),
     ("lean_back", "Lean back", "Height & lean", _seq(dict(x=-15, pitch=-10))),
-    ("turn_left", "Turn the body left (150°)", "Body", _seq(dict(body=150, yaw=150), dur=1.4)),
-    ("turn_right", "Turn the body right (150°)", "Body", _seq(dict(body=-150, yaw=-150), dur=1.4)),
-    ("over_shoulder", "Look over the shoulder", "Body", _seq(dict(body=90, yaw=140), dur=1.2)),
+    ("turn_left", "Turn the body left (150°)", "Body", _seq(dict(body=75, yaw=75), dict(body=150, yaw=150), dur=1.6)),
+    ("turn_right", "Turn the body right (150°)", "Body", _seq(dict(body=-75, yaw=-75), dict(body=-150, yaw=-150), dur=1.6)),
+    ("over_shoulder", "Look over the shoulder", "Body", _seq(dict(body=90, yaw=140), dur=2.0)),
     ("ant_one", "Both antennas one way", "Antennas", _seq(dict(ant=(-60, -60)))),
     ("ant_other", "Both antennas the other way", "Antennas", _seq(dict(ant=(60, 60)))),
     ("ant_left", "Left antenna only", "Antennas", _seq(dict(ant=(0, -60)))),
@@ -459,7 +503,11 @@ def mobility(robot, bus, group: str | None = None) -> dict:
     from reachy_mini.utils import create_head_pose
 
     moves = [m for m in MOVES if not group or m[2] == group]
-    done = []
+    done, body_issue = [], None
+
+    def body_now():
+        j, _ = robot.get_current_joint_positions()
+        return float(np.rad2deg(j[0]))
 
     def go(p, dur):
         head = create_head_pose(x=p.get("x", 0), z=p.get("z", 0), roll=p.get("roll", 0), pitch=p.get("pitch", 0),
@@ -470,13 +518,79 @@ def mobility(robot, bus, group: str | None = None) -> dict:
     try:
         for key, label, grp, seq in moves:
             bus.emit("mobility", step=key, label=label, group=grp, status="moving")
+            start = body_now()
             for pose, dur in seq:
                 go(pose, dur)
-            go({}, 1.2 if any("body" in p for p, _ in seq) else 0.6)
+            turned = None
+            if any("body" in p for p, _ in seq):
+                time.sleep(0.2)
+                target = seq[-1][0]["body"]
+                turned = body_now() - start
+                if abs(turned) < abs(target) * 0.4 or (target and turned * target < 0):
+                    body_issue = (key, round(turned))
+            go({}, 2.0 if turned is not None else 0.6)
+            if turned is not None and body_issue and body_issue[0] == key:
+                bus.emit("mobility", step=key, label=label, group=grp, status="failed", measured=round(turned))
+                continue
             done.append(key)
-            bus.emit("mobility", step=key, label=label, group=grp, status="done")
+            bus.emit("mobility", step=key, label=label, group=grp, status="done", measured=None if turned is None else round(turned))
     except Exception as e:  # SDK errors when the daemon drops mid-test
         bus.emit("mobility", step=None, status="error")
         return {"ok": False, "done": done, "detail": f"Stopped after {len(done)} of {len(moves)} moves",
                 "fix": f"Check that nothing blocks Reachy and that it's on in Reachy Mini Control. ({e})"}
+    if body_issue:
+        return {"ok": False, "done": done, "body_stuck": True,
+                "detail": f"The body didn't turn (it moved {body_issue[1]}° instead of about 150°). The head moves, the body motor doesn't.",
+                "fix": BODY_FIX}
     return {"ok": True, "done": done, "detail": f"All {len(done)} moves played"}
+
+
+BODY_FIX = ("The body motor has probably stopped itself after an overload (it does this to protect itself when it's "
+            "blocked). Check that nothing is touching the base or wrapped around it, then power-cycle Reachy: unplug its "
+            "power for 10 seconds, plug it back in, turn it on again in Reachy Mini Control, and press Connect Reachy.")
+
+
+def body_check(robot) -> dict:
+    """Turn the body 25° each way and measure it: catches a body motor that has shut itself off."""
+    if robot is None:
+        return {"ok": False, "detail": "Reachy isn't connected", "fix": "Press Connect Reachy first."}
+    import numpy as np
+    from reachy_mini.utils import create_head_pose
+
+    def body_now():
+        j, _ = robot.get_current_joint_positions()
+        return float(np.rad2deg(j[0]))
+
+    try:
+        start = body_now()
+        robot.goto_target(head=create_head_pose(yaw=25, degrees=True), body_yaw=np.deg2rad(25), duration=1.0)
+        time.sleep(0.2)
+        left = body_now() - start
+        robot.goto_target(head=create_head_pose(yaw=-25, degrees=True), body_yaw=np.deg2rad(-25), duration=1.4)
+        time.sleep(0.2)
+        right = body_now() - start
+        robot.goto_target(head=create_head_pose(), body_yaw=0.0, duration=1.0)
+    except Exception as e:  # SDK errors when the daemon drops
+        return {"ok": False, "detail": f"Couldn't move the body: {e}", "fix": BODY_FIX}
+    moved = left - right
+    if moved < 20:
+        return {"ok": False, "moved": round(moved), "detail": f"The body barely turned ({moved:.0f}° of 50°).", "fix": BODY_FIX}
+    return {"ok": True, "moved": round(moved), "detail": f"The body turns ({moved:.0f}° of 50°)."}
+
+
+
+def chat_turn(text: str, listen_s: float = 7.0) -> dict:
+    """Setup conversation: Reachy says a line, then listens for the reply (same pipeline as a session)."""
+    from . import elevenlabs
+    from .clock import Clock
+
+    if not elevenlabs.api_key():
+        return {"ok": False, "detail": "No ElevenLabs key", "fix": "Add ELEVENLABS_API_KEY to .env."}
+    clock = Clock(1.0)
+    voice = elevenlabs.ElevenLabsVoice(clock)
+    voice.say(text, "en", 1.0, "base")
+    if listen_s <= 0:
+        return {"ok": True, "heard": None, "speaker": "Reachy" if voice.device is not None else "this computer"}
+    u = elevenlabs.ElevenLabsListener(clock).listen(listen_s)
+    return {"ok": True, "heard": u.text if u else None, "lang": u.language if u else None,
+            "speaker": "Reachy" if voice.device is not None else "this computer"}

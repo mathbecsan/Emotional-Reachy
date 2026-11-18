@@ -20,6 +20,7 @@ dependencies = [
 [project.optional-dependencies]
 robot = ["reachy-mini>=1.11.0"]
 vision = ["opencv-python<5", "torch", "torchvision"]            # FER (kudosscience model) + attention
+audio = ["torch", "transformers>=5"]                            # names sounds (piano, singing, clapping...); ~350 MB model once
 text-emotion = ["transformers", "torch", "scikit-learn"]      # TER DistilBERT (kudosscience model)
 mic = ["faster-whisper", "sounddevice"]
 sensor = ["pyserial"]

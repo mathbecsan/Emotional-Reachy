@@ -9,15 +9,14 @@ import { api, onEvent } from "../api.js";
 import { avatar } from "../components/avatar.js";
 
 const STEPS = [
-  { key: "reachy", title: "Connect Reachy", costume: "base", color: "#5cc8ff", why: "This app needs to reach the robot to move it." },
+  { key: "reachy", title: "Connect Reachy", costume: "base", color: "#5cc8ff", why: "This app needs to reach the robot, and every motor must respond." },
   { key: "sensors", title: "Pulse sensors", costume: "smitten", color: "#ff5a6e", why: "The heartbeat wakes Reachy up and shapes its reactions." },
-  { key: "camera", title: "Camera & gaze", costume: "noir", color: "#c9b28a", why: "Reachy notices where you look and whether you face it." },
-  { key: "mic", title: "Microphone & sounds", costume: "tia", color: "#ff9a4d", why: "Reachy must understand speech, and notice claps, music and singing." },
-  { key: "speaker", title: "Speaker", costume: "diva", color: "#ff6fb1", why: "The participant must hear Reachy clearly." },
-  { key: "follow", title: "Follow me", costume: "hype_bro", color: "#ffc94d", why: "Reachy turns to keep the person in view as they move around." },
-  { key: "mobility", title: "Range of motion", costume: "villain", color: "#b98cff", why: "Every joint moves freely, with nothing in the way." },
+  { key: "mic", title: "Microphone & sounds", costume: "tia", color: "#ff9a4d", why: "Reachy must understand speech, and recognise music, singing, claps and other sounds." },
+  { key: "talk", title: "Talk with Reachy", costume: "diva", color: "#ff6fb1", why: "A short chat: you hear Reachy clearly, and it understands your answers." },
+  { key: "mobility", title: "Range of motion", costume: "villain", color: "#b98cff", why: "Head, antennas and body move freely, with nothing in the way." },
+  { key: "see", title: "See & follow", costume: "noir", color: "#ffc94d", why: "Reachy sees where you look and turns its head and body to follow you, even beyond its camera's view." },
 ];
-const STORE = "bis.setup.v2";
+const STORE = "bis.setup.v3";
 const loadResults = () => {
   try { const r = JSON.parse(localStorage.getItem(STORE)); return r && Date.now() - r.t < 3 * 3600e3 ? r.results : {}; } catch { return {}; }
 };
@@ -28,7 +27,14 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 export function checkView(outlet, startKey) {
   const results = loadResults();
   const done = (i) => ["pass", "skip"].includes(results[STEPS[i]?.key]);
-  const unlocked = (i) => isDebug() || i === 0 || (i <= STEPS.length && [...Array(i).keys()].every(done));
+  // A step opens once every step before it has passed or been skipped, and stays open after that:
+  // re-testing an earlier step never locks the later ones again.
+  const unlocked = (i) => {
+    if (isDebug() || i === 0 || i <= (results._reached || 0)) return true;
+    const open = [...Array(i).keys()].every(done);
+    if (open) { results._reached = Math.max(results._reached || 0, i); saveResults(results); }
+    return open;
+  };
   let idx = STEPS.findIndex((s) => s.key === startKey);
   if (idx < 0 || !unlocked(idx)) idx = Math.max(0, [...STEPS.keys()].find((i) => !done(i)) ?? STEPS.length);
   let stopCurrent = null, running = false, navNext = null;
@@ -108,32 +114,39 @@ export function checkView(outlet, startKey) {
   const SCREENS = {
     reachy(fb, area) {
       const lines = h("ul", { class: "facts" }, h("li", {}, "Checking the robot…"));
+      const bodyLine = h("li", { hidden: true });
       const slot = h("div");
       const fill = async () => {
         const c = await api("/api/check");
         lines.replaceChildren(
           h("li", { "data-ok": String(c.daemon.ok) }, h("b", {}, "Robot software: "), c.daemon.detail),
-          h("li", { "data-ok": String(c.robot.ok) }, h("b", {}, "This app: "), c.robot.detail));
+          h("li", { "data-ok": String(c.robot.ok) }, h("b", {}, "This app: "), c.robot.detail), bodyLine);
         if (!c.daemon.ok) fb.set("fail", "The robot software isn't running", "Without it nothing can move.", "Open Reachy Mini Control and turn the robot on. Then press Connect Reachy.");
         else if (!c.robot.ok) fb.set("wait", "Press Connect Reachy");
-        else if (results.reachy !== "pass") fb.set("wait", "Connected. Press Test a nod and watch Reachy.");
+        else if (results.reachy !== "pass") fb.set("wait", "Connected. Press Test the motors and watch Reachy.");
         return c;
       };
-      const nod = async () => {
+      const test = async () => {
         const r = await post("/api/check/move");
         if (!r.ok) { fb.set("fail", "Reachy didn't move", "The app can't send moves to the robot.", r.fix); setResult("reachy", "fail"); return; }
-        slot.replaceChildren(ask("Did Reachy nod?",
-          () => { fb.set("pass", "Reachy is connected", "Moves reach the robot."); setResult("reachy", "pass"); slot.replaceChildren(); },
-          () => { fb.set("fail", "No movement seen", "The command was sent but Reachy didn't move.", "Check the robot is switched on and its motors are enabled in Reachy Mini Control, then press Connect again."); setResult("reachy", "fail"); }));
+        fb.set("wait", "Reachy nodded. Now checking the body motor…");
+        const b = await post("/api/check/body");
+        bodyLine.hidden = false;
+        bodyLine.dataset.ok = String(!!b.ok);
+        bodyLine.replaceChildren(h("b", {}, "Body motor: "), b.detail);
+        if (!b.ok) { fb.set("fail", "The head moves, but the body doesn't turn", b.detail, b.fix); setResult("reachy", "fail"); return; }
+        slot.replaceChildren(ask("Did Reachy nod, then turn its body left and right?",
+          () => { fb.set("pass", "Reachy is connected and every motor responds", b.detail); setResult("reachy", "pass"); slot.replaceChildren(); },
+          () => { fb.set("fail", "Not all the movement was seen", "", "Check the robot is switched on with motors enabled in Reachy Mini Control, then press Connect again."); setResult("reachy", "fail"); }));
       };
       area.append(lines, h("div", { class: "btn-row" },
         busyBtn("Connect Reachy", async () => {
           const r = await post("/api/check/connect");
           await fill();
           if (!r.ok) { fb.set("fail", "Couldn't reach Reachy", "The robot software isn't running or the USB cable is unplugged.", "Open Reachy Mini Control and turn the robot on, then press Connect again."); setResult("reachy", "fail"); return; }
-          await nod();
+          await test();
         }),
-        busyBtn("Test a nod", nod, false)), slot);
+        busyBtn("Test the motors", test, false)), slot);
       if (results.reachy === "pass") fb.set("pass", "Reachy is connected", "Passed earlier. Test again any time.");
       fill().catch((e) => fb.set("fail", "Couldn't check the robot", e.message));
     },
@@ -147,12 +160,17 @@ export function checkView(outlet, startKey) {
       };
       const tiles = [tile(1), tile(2)];
       area.append(h("p", { class: "instruct" }, "Rest a finger lightly on a sensor and keep still. Try both."), h("div", { class: "sensor-tiles" }, tiles[0].el, tiles[1].el));
-      fb.set("wait", "Connecting to the sensors…");
+      const before = results.sensors;
+      fb.set("wait", "Connecting to the sensors…", "The Arduino restarts when it's opened: this takes about 3 seconds.");
       const seen = new Set();
       const off = onEvent((e) => {
-        if (e.kind !== "probe") return;
-        if (e.done) return;
-        if (!e.ok) { fb.set("fail", e.detail?.includes("not found") ? "A sensor isn't wired correctly" : "No signal from the sensors", e.detail, e.fix); setResult("sensors", "fail"); return; }
+        if (e.kind !== "probe" || e.done) return;
+        if (e.starting) return;
+        if (!e.ok) {
+          fb.set("fail", e.detail?.includes("not found") ? "A sensor isn't wired correctly" : "No signal from the sensors", e.detail, e.fix);
+          if (before !== "pass") setResult("sensors", "fail");      // a re-test hiccup doesn't erase an earlier pass
+          return;
+        }
         e.sensors?.forEach((s, i) => { tiles[i].set(s); if (s.bpm) seen.add(i); });
         if (seen.size) { fb.set("pass", `Heartbeat detected on sensor ${[...seen].map((i) => i + 1).join(" and ")}`, seen.size < 2 ? "Try the other sensor too if you'll use both." : "Both sensors work."); if (results.sensors !== "pass") setResult("sensors", "pass"); }
         else fb.set("wait", "Sensors connected. Waiting for a finger…", `${e.left}s left in this test.`);
@@ -161,110 +179,18 @@ export function checkView(outlet, startKey) {
       return () => { off(); post("/api/check/sensors/stop").catch(() => {}); };
     },
 
-    camera(fb, area) {
-      const label = h("span", { class: "viewport__label" }, "Starting the camera…");
-      const vp = h("div", { class: "viewport" }, h("span", { class: "viewport__grid", "aria-hidden": "true" }), label);
-      const tasks = [task("Look straight at Reachy"), task("Turn your head to the side"), task("Look back at Reachy")];
-      const pickerSlot = h("div");
-      let stopVideo = liveVideo(vp), step = 0;
-      area.append(h("p", { class: "instruct" }, "Sit about an arm's length in front of Reachy, facing it."),
-        h("div", { class: "track" }, vp, h("div", {}, h("ul", { class: "tasks" }, tasks.map((t) => t.el)),
-          h("button", { type: "button", class: "link-sm", onclick: () => choose() }, "Wrong camera? Choose another"))), pickerSlot);
-      const start = async () => {
-        step = 0; tasks.forEach((t) => t.done(false));
-        try { await post("/api/check/track"); } catch (e) { fb.set("fail", "Couldn't start the camera", e.message); }
-      };
-      async function choose() {
-        await post("/api/check/track/stop");
-        stopVideo(); vp.classList.remove("has-video");
-        pickerSlot.replaceChildren(h("p", { class: "muted" }, "Taking a picture with each camera…"));
-        pickerSlot.replaceChildren(await cameraPicker(async () => { pickerSlot.replaceChildren(); stopVideo = liveVideo(vp); await start(); }));
-      }
-      fb.set("wait", "Look straight at Reachy");
-      const off = onEvent((e) => {
-        if (e.kind !== "track") return;
-        if (e.done) { if (step < 3) fb.set("fail", "The camera test timed out", "", "Press Retry and follow the three steps."); return; }
-        if (e.ok === false) { fb.set("fail", "The camera didn't start", e.detail, e.fix); setResult("camera", "fail"); return; }
-        vp.dataset.state = e.state;
-        label.textContent = e.state === "facing" ? "Facing Reachy" : e.state === "turned" ? "Turned away" : "No one in view";
-        if (step === 0 && e.state === "facing") { tasks[0].done(); step = 1; }
-        else if (step === 1 && e.state === "turned") { tasks[1].done(); step = 2; }
-        else if (step === 2 && e.state === "facing") { tasks[2].done(); step = 3; }
-        if (step === 3) { if (results.camera !== "pass") { fb.set("pass", "Reachy sees where you look"); setResult("camera", "pass"); } }
-        else fb.set("wait", tasks[step].el.textContent, e.face ? "" : "Make sure your face is lit and Reachy's camera points at you.");
-      });
-      start();
-      return () => { off(); stopVideo(); post("/api/check/track/stop").catch(() => {}); };
-    },
-
-    follow(fb, area) {
-      // A short game Reachy narrates out loud: stand in front, go to your left, to your right, back to the middle.
-      const ROUND = [
-        { key: "front", text: "Stand in front of Reachy", say: "Let's play follow me! Stand right in front of me, and I'll keep my eyes on you.", ok: (a) => Math.abs(a) < 12, zone: 0 },
-        { key: "left", text: "Walk slowly to your LEFT", say: "Now take two slow steps to your left. I'll follow you.", ok: (a) => a > 22, zone: -1 },
-        { key: "right", text: "Now walk to your RIGHT", say: "Great! Now walk all the way over to your right.", ok: (a) => a < -22, zone: 1 },
-        { key: "back", text: "Come back to the middle", say: "Perfect. Come back to the middle.", ok: (a) => Math.abs(a) < 12, zone: 0 },
-      ];
-      const tasks = ROUND.map((r) => task(r.text));
-      const big = h("div", { class: "coach" }, h("span", { class: "coach__arrow", "aria-hidden": "true" }), h("strong", { class: "coach__text" }, "Press Start the game"));
-      const label = h("span", { class: "viewport__label" }, "Camera off");
-      const vp = h("div", { class: "viewport viewport--small" }, h("span", { class: "viewport__grid", "aria-hidden": "true" }), label);
-      const arc = h("div", { class: "arc", "aria-hidden": "true" },
-        h("span", { class: "arc__zone arc__zone--l" }, "your left"), h("span", { class: "arc__zone arc__zone--m" }, "middle"), h("span", { class: "arc__zone arc__zone--r" }, "your right"),
-        h("span", { class: "arc__you" }, "you"), h("span", { class: "arc__reachy" }));
-      let step = -1, hold = 0, stopVideo = () => {}, following = false;
-      const setStep = (i) => {
-        step = i;
-        tasks.forEach((t, j) => t.el.classList.toggle("is-current", j === i));
-        if (i >= ROUND.length) return;
-        const r = ROUND[i];
-        big.dataset.zone = String(r.zone);
-        big.querySelector(".coach__text").textContent = r.text;
-        arc.dataset.target = String(r.zone);
-        fb.set("wait", r.text, r.zone ? "Reachy should turn its head to keep you in view." : "");
-        say(r.say);
-      };
-      area.append(big, h("div", { class: "follow-grid" }, h("div", {}, arc, vp), h("ul", { class: "tasks" }, tasks.map((t) => t.el))),
-        h("div", { class: "btn-row" }, busyBtn("▶ Start the game", async () => {
-          tasks.forEach((t) => t.done(false)); hold = 0;
-          const r = await post("/api/check/track");
-          following = r.following;
-          if (!following) toast("Reachy isn't connected: the camera is tested, but Reachy won't turn.", "error");
-          stopVideo(); stopVideo = liveVideo(vp);
-          setStep(0);
-        })),
-        h("p", { class: "muted small" }, "Reachy follows people with its camera. Following a voice by sound alone isn't available in this version."));
-      const off = onEvent((e) => {
-        if (e.kind !== "track" || step < 0) return;
-        if (e.done) { if (step < ROUND.length) fb.set("fail", "The game timed out", "", "Press Start the game and follow Reachy's instructions."); return; }
-        if (e.ok === false) { fb.set("fail", "The camera didn't start", e.detail, e.fix); setResult("follow", "fail"); return; }
-        label.textContent = e.face ? `${e.angle > 8 ? "To your left" : e.angle < -8 ? "To your right" : "In the middle"}${e.following ? " · Reachy follows" : ""}` : "No one in view";
-        if (e.face) arc.style.setProperty("--pos", String(Math.max(-1, Math.min(1, -e.angle / 45))));
-        arc.classList.toggle("has-you", !!e.face);
-        if (step >= ROUND.length || !e.face) return;
-        hold = ROUND[step].ok(e.angle) ? hold + 1 : 0;
-        if (hold >= 4) {                       // stay in the zone briefly so a passing glance doesn't count
-          tasks[step].done(); hold = 0;
-          if (step === ROUND.length - 1) {
-            setStep(ROUND.length);
-            big.querySelector(".coach__text").textContent = "Done!";
-            fb.set("pass", following ? "Reachy followed you all the way" : "Tracking works", following ? "" : "Connect Reachy to test the turning too.");
-            say("I followed you the whole way. Nice moves!");
-            setResult("follow", "pass");
-          } else setStep(step + 1);
-        }
-      });
-      return () => { off(); stopVideo(); post("/api/check/track/stop").catch(() => {}); };
-    },
-
     mic(fb, area) {
       const bars = h("div", { class: "levels", "aria-hidden": "true" }, Array.from({ length: 60 }, () => h("i")));
       const t1 = task("Say a sentence to Reachy");
-      const t2 = task("Perform: clap, sing, or play music from your phone");
+      const t2 = task("Perform: clap, sing, or play music (a phone recording works)");
       const heard = h("div", { class: "heard-chips" });
+      const engine = h("p", { class: "muted small" });
       const draw = (r) => {
         [...bars.children].forEach((b, i) => { b.style.height = `${Math.max(4, (r.levels?.[i] || 0) * 100)}%`; });
-        heard.replaceChildren(...[r.speech ? h("span", { class: "chip chip--speech" }, `“${r.speech}”`) : "", ...(r.events || []).map((e) => h("span", { class: "chip chip--sound" }, e))].filter(Boolean));
+        heard.replaceChildren(...[r.speech ? h("span", { class: "chip chip--speech" }, `“${r.speech}”`) : "",
+          ...(r.events || []).map((e) => h("span", { class: "chip chip--sound" }, e))].filter(Boolean));
+        engine.textContent = r.tags?.length ? `Sound classifier: ${r.tags.slice(0, 4).map((t) => `${t.label} ${Math.round(t.score * 100)}%`).join(" · ")}` :
+          r.classifier ? `Sound classifier: ${r.classifier}` : "";
       };
       const finish = () => setResult("mic", t1.isDone() && t2.isDone() ? "pass" : "fail");
       const record = async (which) => {
@@ -280,25 +206,43 @@ export function checkView(outlet, startKey) {
         } else {
           const got = (r.events || []).length > 0;
           t2.done(got);
-          fb.set(got ? "pass" : "fail", got ? `Reachy noticed: ${r.events.join(", ")}` : "Reachy didn't notice the performance", r.speech ? `It heard words: “${r.speech}”` : "",
+          fb.set(got ? "pass" : "fail", got ? `Reachy recognised: ${r.events.join(", ")}` : "Reachy didn't recognise the performance", r.speech ? `It heard words: “${r.speech}”` : "",
             got ? "" : "Make it longer (3+ seconds) and closer to Reachy: clap at least three times, or play music louder.");
         }
         finish();
       };
-      area.append(h("ul", { class: "tasks" }, t1.el, t2.el), bars, heard,
+      area.append(h("ul", { class: "tasks" }, t1.el, t2.el), bars, heard, engine,
         h("div", { class: "btn-row" }, busyBtn("Record speech", () => record(1)), busyBtn("Record a performance", () => record(2), false)));
     },
 
-    speaker(fb, area) {
+    talk(fb, area) {
+      // Three short exchanges, each closed by Reachy so the setup keeps moving.
+      const log = h("ol", { class: "chatlog" });
+      const line = (who, text) => { log.append(h("li", { class: `chatlog__${who}` }, h("b", {}, who === "reachy" ? "Reachy" : "You"), h("span", {}, text))); log.lastChild.scrollIntoView({ block: "nearest" }); };
       const slot = h("div");
-      area.append(h("p", { class: "instruct" }, "Stand where the participant will sit."), h("div", { class: "btn-row" }, busyBtn("Play Reachy's voice", async () => {
-        const r = await post("/api/check/speaker");
-        if (!r.ok) { fb.set("fail", "No sound could be played", r.detail, r.fix); setResult("speaker", "fail"); return; }
-        fb.set("wait", r.detail);
-        slot.replaceChildren(ask("Did you hear Reachy clearly?",
-          () => { fb.set("pass", "Reachy can be heard", r.detail); setResult("speaker", "pass"); slot.replaceChildren(); },
-          () => { fb.set("fail", "The voice wasn't clear", "", r.detail.includes("Reachy") ? "Turn up the Mac's volume for “Reachy Mini Audio” (System Settings › Sound), or reduce noise in the room." : "Reachy's speaker wasn't found, so this computer played it. Check Reachy's USB cable."); setResult("speaker", "fail"); }));
-      })), slot);
+      let heardCount = 0;
+      const turn = async (text, listen = 7) => {
+        line("reachy", text);
+        const r = await post("/api/check/chat", { text, listen });
+        if (!r.ok) throw new Error(r.detail || "Audio problem");
+        if (listen) { if (r.heard) { heardCount += 1; line("you", r.heard); } else line("you", "(Reachy heard nothing)"); }
+        return r.heard;
+      };
+      const firstWord = (t) => (t || "").replace(/^(my name is|i'm|i am|it's|me llamo|soy)\s+/i, "").split(/[\s,.!?]+/)[0];
+      area.append(h("p", { class: "instruct" }, "Reachy will ask three quick questions. Answer out loud, from where the participant will sit."), log,
+        h("div", { class: "btn-row" }, busyBtn("▶ Start the chat", async () => {
+          log.replaceChildren(); slot.replaceChildren(); heardCount = 0;
+          fb.set("wait", "Talking with Reachy…", "Answer each question when Reachy stops speaking.");
+          const yes = await turn("Hi! Can you hear me okay? Say yes if you can.");
+          await turn(yes ? "Great, I heard you. That works! Next question." : "Hmm, I didn't catch that, but let's keep going.", 0);
+          const name = await turn("What's your name?");
+          await turn(name ? `Nice to meet you, ${firstWord(name)}! Okay, my ears work.` : "That's okay. Let's try one more.", 0);
+          const word = await turn("Tell me one word that describes your day.");
+          await turn(word ? `${firstWord(word)}. I like that. Well, now you know this works. Let's continue with the next step!` : "Alright. Now you know how this works. Let's continue with the next step!", 0);
+          slot.replaceChildren(ask("Was Reachy's voice clear, and did it understand you?",
+            () => { const ok = heardCount >= 2; fb.set(ok ? "pass" : "fail", ok ? "Talking with Reachy works" : "Reachy understood too few answers", `It understood ${heardCount} of 3 answers.`, ok ? "" : "Speak a bit louder and closer, and wait until Reachy has finished talking."); setResult("talk", ok ? "pass" : "fail"); slot.replaceChildren(); },
+            () => { fb.set("fail", "The conversation wasn't clear", "", "Turn up the Mac's volume for “Reachy Mini Audio” (System Settings › Sound), move closer, or reduce noise in the room."); setResult("talk", "fail"); }));
+        })), slot);
     },
 
     async mobility(fb, area) {
@@ -314,21 +258,108 @@ export function checkView(outlet, startKey) {
         h("ul", { class: "tasks" }, moves.filter((m) => m.group === g).map((m) => { items[m.key] = task(m.label); return items[m.key].el; })))));
       const off = onEvent((e) => {
         if (e.kind !== "mobility" || !e.step) return;
-        items[e.step]?.el.classList.toggle("is-moving", e.status === "moving");
-        if (e.status === "done") items[e.step]?.done();
+        const it = items[e.step];
+        if (!it) return;
+        it.el.classList.toggle("is-moving", e.status === "moving");
+        it.el.classList.toggle("is-failed", e.status === "failed");
+        if (e.status === "done") it.done();
+        if (e.measured != null) it.el.title = `Body turned ${e.measured}°`;
       });
       async function run(group) {
         if (running) return;
-        moves.filter((m) => !group || m.group === group).forEach((m) => items[m.key].done(false));
-        fb.set("wait", `Reachy is moving${group ? ` (${group})` : ""}…`, "Watch each move as it's ticked off.");
+        moves.filter((m) => !group || m.group === group).forEach((m) => { items[m.key].done(false); items[m.key].el.classList.remove("is-failed"); });
+        fb.set("wait", `Reachy is moving${group ? ` (${group})` : ""}…`, "Watch each move as it's ticked off. Body turns are measured.");
         const r = await post("/api/check/mobility", group ? { group } : {});
-        if (!r.ok) { fb.set("fail", r.detail, "", r.fix); setResult("mobility", "fail"); return; }
+        if (!r.ok) { fb.set("fail", r.body_stuck ? "The body didn't turn" : r.detail, r.body_stuck ? r.detail : "", r.fix); setResult("mobility", "fail"); return; }
         const all = moves.every((m) => items[m.key].isDone());
         slot.replaceChildren(ask(all ? "Did every move look smooth and complete?" : `Did the ${group} moves look right?`,
           () => { slot.replaceChildren(); fb.set(all ? "pass" : "wait", all ? "Full range of motion" : `${group} moves look good`, all ? r.detail : "Run the other groups, or Run every move, to finish."); if (all) setResult("mobility", "pass"); },
-          () => { fb.set("fail", "Something looked off", "", "Make sure nothing touches the head or antennas and Reachy sits on a flat surface. Restart the robot in Reachy Mini Control if a joint seems stuck."); setResult("mobility", "fail"); }));
+          () => { fb.set("fail", "Something looked off", "", "Make sure nothing touches the head, antennas or base and Reachy sits on a flat surface. Power-cycle the robot if a joint seems stuck."); setResult("mobility", "fail"); }));
       }
       return off;
+    },
+
+    see(fb, area) {
+      // Part 1: gaze (face it, turn away, look back). Part 2: follow-me game, narrated by Reachy,
+      // going beyond the camera's view so the body has to turn.
+      const label = h("span", { class: "viewport__label" }, "Starting the camera…");
+      const vp = h("div", { class: "viewport viewport--small" }, h("span", { class: "viewport__grid", "aria-hidden": "true" }), label);
+      const arc = h("div", { class: "arc", "aria-hidden": "true" },
+        h("span", { class: "arc__zone arc__zone--l" }, "your left"), h("span", { class: "arc__zone arc__zone--m" }, "middle"), h("span", { class: "arc__zone arc__zone--r" }, "your right"),
+        h("span", { class: "arc__you" }, "you"), h("span", { class: "arc__reachy" }));
+      const coach = h("div", { class: "coach" }, h("span", { class: "coach__arrow", "aria-hidden": "true" }), h("strong", { class: "coach__text" }, "Sit in front of Reachy and look at it"));
+      const ROUND = [
+        { text: "Look straight at Reachy", say: "First, look straight at me.", ok: (e) => e.state === "facing", zone: 0, part: 1 },
+        { text: "Turn your head to the side", say: "Now turn your head to the side.", ok: (e) => e.state === "turned", zone: 0, part: 1 },
+        { text: "Look back at Reachy", say: "And look back at me.", ok: (e) => e.state === "facing", zone: 0, part: 1 },
+        { text: "Stand up, in front of Reachy", say: "Great, I can see where you look. Now let's play follow me! Stand up in front of me.", ok: (e) => e.face && Math.abs(e.angle) < 15, zone: 0, part: 2 },
+        { text: "Walk FAR to your left, past the edge of the camera", say: "Now walk far to your left, even out of my view. I'll turn my body to find you.", ok: (e) => e.face && e.angle > 45, zone: -1, part: 2 },
+        { text: "Now walk FAR to your right", say: "Found you! Now walk all the way over to your right.", ok: (e) => e.face && e.angle < -45, zone: 1, part: 2 },
+        { text: "Come back to the middle", say: "Perfect. Come back to the middle.", ok: (e) => e.face && Math.abs(e.angle) < 15, zone: 0, part: 2 },
+      ];
+      const tasks = ROUND.map((r) => task(r.text));
+      const pickerSlot = h("div");
+      let step = -1, hold = 0, stopVideo = () => {}, maxBody = 0, following = false;
+      const setStep = (i) => {
+        step = i;
+        tasks.forEach((t, j) => t.el.classList.toggle("is-current", j === i));
+        if (i >= ROUND.length) return;
+        const r = ROUND[i];
+        coach.dataset.zone = String(r.zone);
+        coach.querySelector(".coach__text").textContent = r.text;
+        arc.dataset.target = String(r.zone);
+        fb.set("wait", r.text, r.zone ? "Walk slowly. Reachy turns its head first, then its body. If you leave its view, it keeps turning to find you." : "");
+        say(r.say);
+      };
+      async function start() {
+        tasks.forEach((t) => t.done(false)); hold = 0; maxBody = 0;
+        const r = await post("/api/check/track");
+        following = r.following;
+        if (!following) toast("Reachy isn't connected: only the camera is tested (no turning).", "error");
+        stopVideo(); stopVideo = liveVideo(vp);
+        setStep(0);
+      }
+      async function choose() {
+        await post("/api/check/track/stop");
+        stopVideo(); vp.classList.remove("has-video");
+        pickerSlot.replaceChildren(h("p", { class: "muted" }, "Taking a picture with each camera…"));
+        pickerSlot.replaceChildren(await cameraPicker(async () => { pickerSlot.replaceChildren(); await start(); }));
+      }
+      area.append(coach, h("div", { class: "follow-grid" }, h("div", {}, vp, arc),
+        h("div", {}, h("ul", { class: "tasks" }, tasks.map((t) => t.el)),
+          h("button", { type: "button", class: "link-sm", onclick: () => choose() }, "Wrong camera? Choose another"))),
+      h("div", { class: "btn-row" }, busyBtn("▶ Start", start)), pickerSlot,
+      h("p", { class: "muted small" }, "Reachy follows people with its camera, and turns its body to search when they walk out of view. Following a voice by sound alone isn't available in this version."));
+      const off = onEvent((e) => {
+        if (e.kind !== "track" || step < 0) return;
+        if (e.done) { if (step < ROUND.length) fb.set("fail", "The test timed out", "", "Press Start and follow Reachy's instructions."); return; }
+        if (e.ok === false) { fb.set("fail", "The camera didn't start", e.detail, e.fix); setResult("see", "fail"); return; }
+        vp.dataset.state = e.state;
+        maxBody = Math.max(maxBody, Math.abs(e.body || 0));
+        label.textContent = e.state === "search" ? "Searching for you…" : e.face ? `${e.state === "facing" ? "Facing Reachy" : "Turned away"} · ${e.angle > 8 ? "your left" : e.angle < -8 ? "your right" : "middle"}${e.following ? ` · body ${e.body}°` : ""}` : "No one in view";
+        if (e.face) arc.style.setProperty("--pos", String(Math.max(-1, Math.min(1, -e.angle / 70))));
+        arc.classList.toggle("has-you", !!e.face);
+        if (step >= ROUND.length) return;
+        hold = ROUND[step].ok(e) ? hold + 1 : 0;
+        if (hold >= (ROUND[step].part === 1 ? 2 : 4)) {     // hold the position briefly so a glance doesn't count
+          tasks[step].done(); hold = 0;
+          if (step < ROUND.length - 1) { setStep(step + 1); return; }
+          setStep(ROUND.length);
+          coach.querySelector(".coach__text").textContent = "Done!";
+          const bodyOk = !following || maxBody >= 40;
+          if (bodyOk) {
+            fb.set("pass", following ? `Reachy followed you, turning its body up to ${maxBody}°` : "Gaze and tracking work", following ? "" : "Connect Reachy to test the turning too.");
+            say("I followed you the whole way. Nice moves!");
+            setResult("see", "pass");
+          } else {
+            fb.set("fail", "Reachy's head followed you, but its body didn't turn", `The body turned only ${maxBody}°.`,
+              "The body motor may have stopped after an overload. Power-cycle Reachy (unplug its power for 10 seconds), then run Range of motion again.");
+            setResult("see", "fail");
+          }
+        }
+      });
+      fb.set("wait", "Press Start, then follow Reachy's instructions.");
+      return () => { off(); stopVideo(); post("/api/check/track/stop").catch(() => {}); };
     },
   };
 
@@ -387,7 +418,7 @@ export function checkView(outlet, startKey) {
 
   function summary() {
     const pass = STEPS.filter((s) => results[s.key] === "pass").length;
-    const critical = ["reachy", "sensors", "mic", "speaker"].filter((k) => results[k] !== "pass");
+    const critical = ["reachy", "sensors", "mic", "talk"].filter((k) => results[k] !== "pass");
     return h("div", { class: "screen summary-screen" },
       h("div", { class: "screen__head" }, h("div", { class: "screen__avatar" }, avatar(critical.length ? "hypochondriac" : "hype_bro", { size: 120, color: critical.length ? "#ffc94d" : "#7be0a8", animate: true })),
         h("div", {}, h("p", { class: "screen__step" }, "Summary"), h("h1", { class: "screen__title" }, critical.length ? "Almost ready" : "Ready for a session"),
