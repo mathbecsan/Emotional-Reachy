@@ -127,6 +127,42 @@ def camera(index: int = 0) -> dict:
             "fix": "" if faces else "Sit in front of Reachy to test face detection."}
 
 
+def camera_snapshot(index: int) -> bytes | None:
+    """One JPEG from camera `index` (for the picker), or None if it gives no picture."""
+    import cv2
+
+    cap = cv2.VideoCapture(index)
+    frame = None
+    try:
+        if not cap.isOpened():
+            return None
+        for _ in range(30):
+            ok, f = cap.read()
+            if ok and f is not None:
+                frame = f
+                if f.mean() > 3:      # some cameras start with black frames
+                    break
+            time.sleep(0.05)
+    finally:
+        cap.release()
+    if frame is None:
+        return None
+    h_, w_ = frame.shape[:2]
+    frame = cv2.resize(frame, (320, int(320 * h_ / w_)))
+    return cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 70])[1].tobytes()
+
+
+def camera_names() -> list[str]:
+    """Camera names as macOS lists them (order may differ from OpenCV's indices)."""
+    import subprocess
+
+    try:
+        out = subprocess.run(["system_profiler", "SPCameraDataType"], capture_output=True, text=True, timeout=5).stdout
+    except (OSError, subprocess.SubprocessError):
+        return []
+    return [line.strip().rstrip(":") for line in out.splitlines() if line.startswith("    ") and not line.startswith("      ") and line.strip().endswith(":")]
+
+
 class SensorProbe(threading.Thread):
     """Streams both pulse sensors to the UI (finger on/off, live BPM) for up to 90 s."""
 
@@ -277,6 +313,7 @@ class TrackProbe(threading.Thread):
         super().__init__(daemon=True, name="track-probe")
         self.bus, self.robot, self.index, self.seconds = bus, robot, index, seconds
         self.stop_event = threading.Event()
+        self.jpeg: bytes | None = None      # latest frame with the face box, for the live preview
 
     def run(self):
         try:
@@ -308,8 +345,14 @@ class TrackProbe(threading.Thread):
                     faces = side.detectMultiScale(gray, 1.2, 5, minSize=(40, 40))
                     if not len(faces):
                         faces = side.detectMultiScale(cv2.flip(gray, 1), 1.2, 5, minSize=(40, 40))
+                preview = cv2.resize(frame, (480, int(480 * h_ / w_)))
                 if len(faces):
                     x, y, fw, fh = max(faces, key=lambda f: f[2] * f[3])
+                    k = 480 / (w_ / 2)
+                    cv2.rectangle(preview, (int(x * k), int(y * k)), (int((x + fw) * k), int((y + fh) * k)),
+                                  (168, 224, 123) if facing else (77, 201, 255), 3)
+                self.jpeg = cv2.imencode(".jpg", preview, [cv2.IMWRITE_JPEG_QUALITY, 65])[1].tobytes()
+                if len(faces):
                     fx = (x + fw / 2) / (w_ / 2) * 2 - 1
                     fy = (y + fh / 2) / (h_ / 2) * 2 - 1
                     if last_x is not None:

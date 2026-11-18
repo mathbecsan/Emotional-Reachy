@@ -197,6 +197,53 @@ def mount_routes(app: FastAPI, runner: SessionRunner, bus: EventBus, cfg: Config
         track["thread"].start()
         return {"ok": True, "following": robot is not None}
 
+    @app.get("/api/check/track/stream")
+    async def track_stream():
+        """Live camera preview (MJPEG) while the camera test runs."""
+        from fastapi.responses import StreamingResponse
+
+        async def frames():
+            last = None
+            for _ in range(600):                     # ~60 s at most
+                t = track["thread"]
+                if t is None or not t.is_alive():
+                    break
+                if t.jpeg is not None and t.jpeg is not last:
+                    last = t.jpeg
+                    yield b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + last + b"\r\n"
+                await asyncio.sleep(0.1)
+        return StreamingResponse(frames(), media_type="multipart/x-mixed-replace; boundary=frame")
+
+    @app.get("/api/check/cameras")
+    async def cameras() -> dict:
+        return {"current": cfg.camera_index, "names": await asyncio.to_thread(checks.camera_names), "indices": [0, 1, 2]}
+
+    @app.get("/api/check/camera/{index}.jpg")
+    async def camera_jpg(index: int):
+        from fastapi.responses import Response
+
+        idle()
+        t = track["thread"]
+        if t is not None and t.is_alive():
+            t.stop_event.set()
+            await asyncio.to_thread(t.join, 2)
+        jpg = await asyncio.to_thread(checks.camera_snapshot, index)
+        if jpg is None:
+            raise HTTPException(404, "no picture from this camera")
+        return Response(jpg, media_type="image/jpeg", headers={"Cache-Control": "no-store"})
+
+    @app.post("/api/check/camera/use")
+    async def camera_use(body: dict) -> dict:
+        index = int(body.get("index", 0))
+        cfg.camera_index = runner.cfg.camera_index = index
+        try:                                         # remember it across restarts (.env is git-ignored)
+            env = PROFILES_DIR.parent / ".env"
+            lines = [ln for ln in (env.read_text().splitlines() if env.exists() else []) if not ln.startswith("BIS_CAMERA_INDEX=")]
+            env.write_text("\n".join(lines + [f"BIS_CAMERA_INDEX={index}"]) + "\n")
+        except OSError as e:
+            logger.warning("couldn't save the camera choice: %s", e)
+        return {"ok": True, "index": index}
+
     @app.post("/api/check/track/stop")
     async def check_track_stop() -> dict:
         t = track["thread"]

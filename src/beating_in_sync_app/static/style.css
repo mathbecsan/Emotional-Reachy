@@ -720,3 +720,11 @@ body[data-view="title"] .shell__outlet, body[data-view="menu"] .shell__outlet { 
 .menu__bands span:nth-child(1) { width: 58%; right: -12%; }
 .menu__bands span:nth-child(2) { right: calc(46% - 7px); }
 .menu__preview { padding-left: clamp(40px, 6vw, 90px); }
+.viewport__video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); display: none; }
+.viewport.has-video .viewport__video { display: block; }
+.viewport.has-video .viewport__grid, .viewport.has-video .viewport__dot { display: none; }
+.viewport__label { z-index: 1; background: rgba(0, 0, 0, 0.55); padding: 2px 8px; border-radius: 6px; }
+.cam-picker__row { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 6px; }
+.cam { display: flex; flex-direction: column; gap: 4px; padding: 6px; border-radius: 12px; border: 2px solid var(--line); background: var(--panel-2); cursor: pointer; font-size: 12px; color: var(--muted); }
+.cam img { width: 160px; height: 120px; object-fit: cover; border-radius: 8px; background: #08080c; }
+.cam.is-on { border-color: var(--accent); color: var(--text); }

@@ -212,7 +212,10 @@ export function checkView(outlet, startKey) {
   async function trackScreen(fb, area, mode) {
     const dot = h("span", { class: "viewport__dot" });
     const label = h("span", { class: "viewport__label" }, "Starting the camera…");
-    const vp = h("div", { class: "viewport" }, h("span", { class: "viewport__grid", "aria-hidden": "true" }), dot, label);
+    const video = h("img", { class: "viewport__video", alt: "Live view from the camera" });
+    const vp = h("div", { class: "viewport" }, h("span", { class: "viewport__grid", "aria-hidden": "true" }), video, dot, label);
+    const startStream = () => { video.src = `/api/check/track/stream?t=${Date.now()}`; vp.classList.add("has-video"); };
+    if (mode === "camera") area.append(await cameraPicker(async () => { await startTrack(); }));
     const tasks = mode === "camera"
       ? [task("Look straight at Reachy"), task("Turn your head to the side"), task("Look back at Reachy")]
       : [task("Move to one side of Reachy"), task("Move to the other side"), task("Come back to the middle")];
@@ -244,9 +247,46 @@ export function checkView(outlet, startKey) {
         fb.set("wait", tasks[step].el.textContent, e.face ? "" : "Sit or stand in front of Reachy, about an arm's length away.", e.state === "none" && e.left < 25 ? "Make sure the room is lit and your face isn't backlit by a window." : "");
       }
     });
-    try { const r = await post("/api/check/track"); if (mode === "follow" && !r.following) toast("Reachy isn't connected: only the camera will be tested."); }
-    catch (e) { fb.set("fail", "Couldn't start the camera test", e.message); }
-    return () => { off(); post("/api/check/track/stop").catch(() => {}); };
+    async function startTrack() {
+      step = 0; sideA = null; tasks.forEach((t) => t.done(false));
+      try {
+        const r = await post("/api/check/track");
+        if (mode === "follow" && !r.following) toast("Reachy isn't connected: only the camera will be tested.");
+        setTimeout(startStream, 400);
+      } catch (e) { fb.set("fail", "Couldn't start the camera test", e.message); }
+    }
+    await startTrack();
+    return () => { off(); video.removeAttribute("src"); post("/api/check/track/stop").catch(() => {}); };
+  }
+
+  /** Thumbnails of each camera so the right one (Reachy's) can be picked by sight. */
+  async function cameraPicker(onChange) {
+    const box = h("div", { class: "cam-picker" }, h("p", { class: "creator__label" }, "Which camera is Reachy's?"));
+    let info = { current: 0, names: [], indices: [0, 1, 2] };
+    try { info = await api("/api/check/cameras"); } catch { /* defaults */ }
+    const row = h("div", { class: "cam-picker__row" });
+    box.append(row, info.names.length ? h("p", { class: "muted small" }, `This Mac has: ${info.names.join(", ")}. Pick the picture taken from Reachy's point of view.`) : "");
+    const draw = (current) => {
+      row.replaceChildren(...info.indices.map((i) => {
+        const img = h("img", { alt: `Camera ${i + 1}`, loading: "lazy" });
+        const card = h("button", { type: "button", class: `cam${i === current ? " is-on" : ""}`, "aria-pressed": String(i === current),
+          onclick: async () => {
+            await post("/api/check/camera/use", { index: i });
+            toast(`Using camera ${i + 1}`);
+            draw(i);
+            await onChange();
+          } }, img, h("span", {}, `Camera ${i + 1}${i === current ? " · in use" : ""}`));
+        img.onerror = () => card.remove();
+        return card;
+      }));
+    };
+    // snapshots open each camera briefly, so load them one after another before the live test starts
+    draw(info.current);
+    for (const [n, card] of [...row.children].entries()) {
+      const img = card.querySelector("img");
+      await new Promise((res) => { img.onload = res; img.onerror = () => { card.remove(); res(); }; img.src = `/api/check/camera/${info.indices[n]}.jpg?t=${Date.now()}`; });
+    }
+    return box;
   }
 
   // ------------------------------------------------------------------ screens
