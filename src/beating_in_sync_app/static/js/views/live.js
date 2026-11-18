@@ -67,7 +67,7 @@ function controls(getLang) {
       btn("Next stage", "/next", "", "Advance if Reachy stalls"),
       btn("Scold now", "/scold", "", "Manual attention trigger if the camera check is unreliable"),
       btn("Pause", "/pause", "btn--danger", "Stop word: Reachy drops the act, says a sincere goodbye, sleeps")),
-    h("h3", { class: "card__sub" }, "Pulse sensor (simulated)"),
+    h("h3", { class: "card__sub" }, "Pulse sensor (simulated: only in sessions without real sensors)"),
     h("div", { class: "btn-row" },
       btn("♥ Finger on sensor", "/finger on", "btn--primary", "Participant puts their finger on the sensor: Reachy snores, then wakes"),
       btn("Finger off", "/finger off", "", "Participant lets go: mid-session Reachy asks for their heartbeat back"),

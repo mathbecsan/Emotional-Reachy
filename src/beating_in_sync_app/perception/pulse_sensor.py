@@ -51,6 +51,8 @@ BAUD = 115200
 IR_LINE = re.compile(r"^\d+,\d+$")
 WAVE_POINTS = 90        # waveform points sent to the UI per sensor
 EMIT_HZ = 5.0
+BOOT_S = 12.0           # allowed for the first line after the port opens (the board resets)
+STALL_S = 3.0           # no lines for this long = the board hung: reset it by reopening
 
 
 class SampleBuffer:
@@ -263,6 +265,7 @@ class ArduinoPulseSource(threading.Thread):
         self.analyzers = [BeatAnalyzer(), BeatAnalyzer()]
         self.stop_event = threading.Event()
         self.source_label = "simulated Arduino" if simulated else (port or "auto")
+        self.lines = 0                     # lines received (diagnostics)
         self.wake_armed = mode != "wake"   # in "wake" mode sensor 2 only counts after the baseline
 
     # ---------------------------------------------------------------- serial
@@ -316,8 +319,19 @@ class ArduinoPulseSource(threading.Thread):
                 pass
 
     def _read_lines(self, ser):
+        last_data, got = time.monotonic(), False
         while not self.stop_event.is_set():
             line = ser.readline()
+            if not line.strip():
+                limit = STALL_S if got else BOOT_S   # a freshly reset board can take ~10 s to start
+                # Watchdog: the Nano sometimes stops streaming (its I2C bus to a sensor hangs) while
+                # the USB link stays open, so nothing errors and the session waits forever. Reopening
+                # the port resets the board, which fixes it.
+                if self.simulated is None and time.monotonic() - last_data > limit:
+                    raise RuntimeError(f"no data from the Arduino for {limit:.0f} s")
+                continue
+            last_data, got = time.monotonic(), True
+            self.lines += 1
             try:
                 vals = [int(p) for p in line.decode(errors="ignore").strip().split(",")]
             except ValueError:
@@ -340,7 +354,8 @@ class ArduinoPulseSource(threading.Thread):
             reader.start()
             self._analyse(reader)
             if not self.stop_event.is_set():
-                self.log.event("sensor", self.clock.now(), text="Pulse sensors disconnected: reconnecting…")
+                self.log.event("sensor", self.clock.now(), text="Pulse sensors stopped sending: restarting them…")
+                self.stop_event.wait(0.5)
 
     def _analyse(self, reader):
         last_bpm_push = last_emit = 0.0

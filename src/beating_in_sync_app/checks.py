@@ -222,7 +222,7 @@ class SensorProbe(threading.Thread):
         ser.reset_input_buffer()
         t0 = last = last_data = time.monotonic()
         problem, problem_t = None, 0.0
-        vals = []
+        vals, resets = [], 0
         try:
             while not self.stop_event.is_set() and time.monotonic() - t0 < self.seconds:
                 raw = ser.readline().decode(errors="ignore").replace("\x00", "").strip()
@@ -233,7 +233,17 @@ class SensorProbe(threading.Thread):
                     parsed = [int(x) for x in raw.split(",")]
                 except ValueError:
                     parsed = []
+                if vals and now - last_data > 3 and resets < 2:
+                    # The board stopped streaming (I2C hang): reopen the port to reset it, quietly.
+                    resets += 1
+                    ser.close()
+                    ser = serial.Serial(port, BAUD, timeout=0.5, exclusive=True)
+                    time.sleep(2)
+                    ser.reset_input_buffer()
+                    vals, t0 = [], time.monotonic()
+                    continue
                 if len(parsed) >= 2:            # a good line: the board works (forget an old "not found")
+                    resets = 0 if now - last_data < 1 else resets
                     vals, last_data = parsed, now
                     if now - problem_t > 3:
                         problem = None

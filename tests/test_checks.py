@@ -1,4 +1,6 @@
 """Check setup API and the motion settings."""
+import time
+
 from fastapi.testclient import TestClient
 
 from beating_in_sync_app.body.gestures import GESTURES
@@ -112,3 +114,28 @@ def test_repair_stops_when_a_session_runs_and_finds_reachys_port(monkeypatch):
         {"device": "/dev/cu.usbmodemSN1", "description": "USB BillBoard", "busy": False},
         {"device": "/dev/cu.usbmodem5B7B", "description": "USB Single Serial", "busy": True}])
     assert repair.reachy_port() == "/dev/cu.usbmodem5B7B"
+
+
+def test_pulse_watchdog_resets_a_hung_arduino(monkeypatch):
+    """The Nano can stop streaming while USB stays open: the reader must give up so the port is reopened."""
+    import pytest
+    from beating_in_sync_app.perception import pulse_sensor as ps
+
+    monkeypatch.setattr(ps, "STALL_S", 0.2)
+
+    class HungSerial:
+        def __init__(self):
+            self.n = 0
+
+        def readline(self):
+            self.n += 1
+            if self.n <= 5:
+                return b"120000,121000\n"
+            time.sleep(0.05)
+            return b""
+
+    src = ps.ArduinoPulseSource.__new__(ps.ArduinoPulseSource)
+    src.simulated, src.stop_event = None, __import__("threading").Event()
+    src.bufs, src.lines = [ps.SampleBuffer(), ps.SampleBuffer()], 0
+    with pytest.raises(RuntimeError, match="no data"):
+        src._read_lines(HungSerial())
