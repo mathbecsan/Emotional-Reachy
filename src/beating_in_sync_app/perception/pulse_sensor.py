@@ -271,17 +271,51 @@ class ArduinoPulseSource(threading.Thread):
             return self.simulated
         import serial
 
-        port = self.port or find_arduino()
+        # One free FTDI (usbserial) port is the Nano: use it directly. Probing every port took seconds
+        # and failed whenever the setup checklist's sensor test was still releasing the port.
+        free = [p["device"] for p in list_ports() if not p["busy"] and "usbserial" in p["device"]]
+        port = self.port or (free[0] if len(free) == 1 else find_arduino())
         if not port:
             raise RuntimeError("No port streaming pulse data. Is the Arduino Nano plugged in (red lights on all three boards)?")
-        ser = serial.Serial(port, BAUD, timeout=1)
+        ser = serial.Serial(port, BAUD, timeout=1, exclusive=True)
         time.sleep(2)  # the Nano resets when the port opens
         ser.reset_input_buffer()
         self.source_label = port
         logger.info("Pulse sensors on %s", port)
         return ser
 
+    def _connect(self):
+        """Open the sensors, retrying every 3 s until they answer (or the session stops). Never gives up:
+        a session that starts a moment too early, or an Arduino plugged in late, still gets its heartbeat."""
+        import serial
+
+        tries, last_note = 0, -1e9
+        while not self.stop_event.is_set():
+            try:
+                ser = self._open()
+                self.log.event("sensor", self.clock.now(), text=f"Pulse sensors connected ({self.source_label}).")
+                return ser
+            except (RuntimeError, OSError, serial.SerialException) as e:
+                tries += 1
+                if time.monotonic() - last_note > 15:     # say it once, then every 15 s while it lasts
+                    last_note = time.monotonic()
+                    logger.error("Pulse sensors unavailable: %s", e)
+                    self.log.event("sensor", self.clock.now(), text=f"Pulse sensors unavailable, retrying: {e}")
+                self.stop_event.wait(3.0)
+        return None
+
     def _reader(self, ser):
+        try:
+            self._read_lines(ser)
+        except Exception as e:  # USB unplugged or port lost: the analysis loop reconnects
+            logger.error("Pulse sensors disconnected: %s", e)
+        finally:
+            try:
+                ser.close()
+            except Exception:
+                pass
+
+    def _read_lines(self, ser):
         while not self.stop_event.is_set():
             line = ser.readline()
             try:
@@ -295,20 +329,23 @@ class ArduinoPulseSource(threading.Thread):
             t = time.monotonic()
             for buf, v in zip(self.bufs, vals):
                 buf.push(v, t)
-        ser.close()
 
     # ---------------------------------------------------------------- analysis
     def run(self):
-        try:
-            ser = self._open()
-        except (RuntimeError, OSError) as e:
-            logger.error("Pulse sensors unavailable: %s", e)
-            self.log.event("sensor", self.clock.now(), text=f"Pulse sensors unavailable: {e}")
-            return
-        threading.Thread(target=self._reader, args=(ser,), daemon=True, name="arduino-serial").start()
+        while not self.stop_event.is_set():
+            ser = self._connect()
+            if ser is None:
+                return
+            reader = threading.Thread(target=self._reader, args=(ser,), daemon=True, name="arduino-serial")
+            reader.start()
+            self._analyse(reader)
+            if not self.stop_event.is_set():
+                self.log.event("sensor", self.clock.now(), text="Pulse sensors disconnected: reconnecting…")
+
+    def _analyse(self, reader):
         last_bpm_push = last_emit = 0.0
         was = [False, False]
-        while not self.stop_event.is_set():
+        while not self.stop_event.is_set() and reader.is_alive():
             now = time.monotonic()
             results = []
             for buf, an in zip(self.bufs, self.analyzers):

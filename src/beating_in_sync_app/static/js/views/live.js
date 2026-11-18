@@ -101,6 +101,7 @@ export function liveView(outlet) {
   const ctl = controls();
   const banner = h("div", { class: "banner", hidden: true });
   const status = h("p", { class: "live__status" }, "Waiting for a session");
+  const sensorWarn = h("div", { class: "banner banner--warn", hidden: true, role: "alert" });
   const actions = h("div", { class: "btn-row live__actions" },
     h("button", { class: "btn", type: "button", title: "Skip ahead (next personality, or next stage)",
       onclick: () => command("/next").catch((e) => toast(e.message, "error")) }, "Skip ahead"),
@@ -117,6 +118,7 @@ export function liveView(outlet) {
   const layout = h("div", { class: "live" },
     timeline.el,
     banner,
+    sensorWarn,
     strip.el,
     h("div", { class: "live__cols" },
       h("div", { class: "live__left" },
@@ -173,7 +175,7 @@ export function liveView(outlet) {
       }
       case "session":
         if (e.status === "running") {
-          chart.reset(); log.reset(); timeline.reset(); sensors.reset(); strip.reset(); baseline = null;
+          chart.reset(); log.reset(); timeline.reset(); sensors.reset(); strip.reset(); baseline = null; sensorWarn.hidden = true;
           banner.hidden = true; ctl.setLang(e.language_hint);
           setRunning(true);
         } else {
@@ -242,6 +244,13 @@ export function liveView(outlet) {
       case "sound": log.note(`♫ ${e.text}`, "line--stage"); break;
       case "sensor":
         log.note(e.text, "line--prompt");
+        if (/Pulse sensors unavailable|disconnected/.test(e.text)) {
+          sensorWarn.hidden = false;
+          sensorWarn.replaceChildren(h("strong", {}, "The pulse sensors aren't connected, so Reachy can't feel the heartbeat yet. "),
+            h("span", {}, "It keeps retrying by itself. Check the Arduino's USB cable, and close the Arduino IDE if it's open. "),
+            h("button", { type: "button", class: "btn btn--small", onclick: () => window.dispatchEvent(new Event("repair")) }, "🔧 Repair"));
+        }
+        if (/Pulse sensors connected/.test(e.text)) sensorWarn.hidden = true;
         if (/starts snoring/.test(e.text)) status.textContent = "Snoring · learning their resting heartbeat (about a minute)";
         if (/unavailable|not found/i.test(e.text)) toast(e.text, "error");
         break;
