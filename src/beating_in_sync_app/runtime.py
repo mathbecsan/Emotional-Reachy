@@ -9,6 +9,7 @@ import threading
 from dataclasses import asdict, dataclass
 
 import anthropic
+import httpx
 
 from . import elevenlabs
 from .body.moves import ReachyMiniBody, SimBody
@@ -40,6 +41,7 @@ class SessionOptions:
     llm: bool = True                # Claude writes the lines; False = offline templates
     heart: str = "sim"              # sim | arduino | arduino-sim (real beat pipeline, synthetic IR)
     camera: bool = True             # face emotion + attention (needs the vision extra)
+    conversation: str = "realtime"  # realtime (ElevenLabs agent, fluid) | scripted (Director + templates/Claude)
     listener: str = "elevenlabs"    # elevenlabs (mic + typed) | web (typed) | console | mic (whisper) | scenario
     scenario: str | None = None
     voice: str = "elevenlabs"       # elevenlabs (Reachy's speaker) | mac (macOS `say`) | sim (text only)
@@ -135,7 +137,17 @@ class SessionRunner:
         else:
             voice = SimVoice(clock)
         user = UserModel(language=opts.language_hint, no_tease=opts.no_tease)
-        session = Session(cfg, clock, hub, heart, body, voice, writer, log, user, profile, sim_heart, rng)
+        agent_id = None
+        if opts.conversation == "realtime" and has_el and opts.listener not in ("scenario", "console", "web"):
+            try:
+                from .realtime import ensure_agent
+
+                agent_id = ensure_agent(profile)
+            except (httpx.HTTPError, KeyError, ValueError) as e:
+                logger.error("Could not set up the live agent (%s); using the scripted conversation.", e)
+                self.bus.emit("error", message=f"Live conversation unavailable ({e}); using scripted mode.")
+        session = Session(cfg, clock, hub, heart, body, voice, writer, log, user, profile, sim_heart, rng,
+                          realtime_agent=agent_id)
 
         if opts.listener == "scenario":
             listener = ScriptedListener(opts.scenario, session.on_command, clock)

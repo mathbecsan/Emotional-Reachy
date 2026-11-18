@@ -5,6 +5,7 @@ The Personality doc calls the BPM threshold and the 3 s attention window
 """
 import os
 from dataclasses import dataclass, field, fields
+from pathlib import Path
 
 
 @dataclass
@@ -74,6 +75,10 @@ class Config:
     seed: int = 7
 
 
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+PATH_FIELDS = ("fer_model_path", "ter_model_dir", "music_dir", "sessions_dir")
+
+
 def config_from_env() -> Config:
     """Override any Config field with an env var named BIS_<FIELD> (see .env.example)."""
     cfg = Config()
@@ -91,4 +96,8 @@ def config_from_env() -> Config:
         else:
             val = raw
         setattr(cfg, f.name, val)
+    # Relative paths are relative to the project, whatever directory the app was started from.
+    for name in PATH_FIELDS:
+        path = Path(getattr(cfg, name)).expanduser()
+        setattr(cfg, name, str(path if path.is_absolute() else PROJECT_ROOT / path))
     return cfg

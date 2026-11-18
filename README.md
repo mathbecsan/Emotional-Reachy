@@ -35,6 +35,30 @@ beating-in-sync                            # web UI at http://localhost:7860, si
 | Find the Arduino's port | `beating-in-sync --list-ports` |
 | As a Reachy Mini app (dashboard) | installed via the `reachy_mini_apps` entry point `BeatingInSyncApp` |
 
+## Live conversation (default)
+
+Stages 1-4 run as one **realtime conversation with an ElevenLabs Agent** — the same
+shape as Pollen's conversation app: realtime speech in and out, a personality
+profile, and tools that move the robot.
+
+- The agent is created automatically on first run from `profiles/<name>/profile.md`
+  + the fixed safety rules (ids cached in the git-ignored `.agent_cache.json`; edit
+  the profile and a new agent is made). LLM: `claude-sonnet-4-6` inside ElevenLabs
+  (`BIS_AGENT_LLM` to change), voice `eleven_v4_turbo` with Callum.
+- It listens continuously through Reachy's mic, answers anything, asks its own
+  questions, switches language when asked, and speaks from Reachy's speaker (mic muted
+  while it talks so it never hears itself).
+- It moves Reachy by calling `express(mode)` / `dance()`. The Director vetoes moves
+  that break the rules (teasing an opted-out participant, three provocations in a row,
+  provoking after discomfort) and tells the agent why.
+- The Director feeds it what Reachy senses as silent context: heart jumps, faces,
+  looking away, finger off the sensor, and each stage's goal (stage 4 lists the
+  persona moves allowed for this participant). The stop word still stops everything.
+- Stages advance on the protocol's timings and on what Reachy learned (name and
+  language → stage 3; five turns → stage 4; three persona moves → music).
+- If the live agent is unavailable, the session falls back to the scripted Director
+  mode automatically. Choose "Scripted" in the start form to force it.
+
 ## Voice and hearing (ElevenLabs)
 
 Put `ELEVENLABS_API_KEY=...` in `.env` (never commit it). Reachy then speaks with

@@ -42,7 +42,7 @@ GESTURE_FOR = {Mode.SLEEPY: "sleepy", Mode.CURIOUS: "curious", Mode.EXCITED: "ex
 
 class Session:
     def __init__(self, cfg, clock, hub, heart, body, voice, writer, session_log, user: UserModel, profile,
-                 sim_heart=None, rng=None):
+                 sim_heart=None, rng=None, realtime_agent: str | None = None):
         self.cfg, self.clock, self.hub, self.heart = cfg, clock, hub, heart
         self.body, self.voice, self.writer, self.log = body, voice, writer, session_log
         self.user, self.sim_heart = user, sim_heart
@@ -56,6 +56,7 @@ class Session:
         self.transcript = []
         self.force_next = False
         self.stop_reason: Optional[str] = None
+        self.realtime_agent = realtime_agent   # ElevenLabs agent id: stages 1-4 run as a live conversation
 
     # ================================================================ commands
     def on_command(self, line: str):
@@ -249,14 +250,8 @@ class Session:
         self.listener, self.analyzer = listener, analyzer
         try:
             self.stage0_baseline()
-            self.stage1_wake()
-            self.stage2_intro()
-            self.stage3_conversation()
-            if self.user.no_tease or not self.director.allowed_provocations:
-                logger.info("=== STAGE 4 skipped (no teasing for this participant / profile) ===")
-                self.log.event("stage", self.clock.now(), stage=4, skipped=True)
-            else:
-                self.stage4_provocation()
+            if not (self.realtime_agent and self.realtime_stages()):
+                self.scripted_stages()
             self.stage5_music()
         except StopSession as e:
             logger.warning("STOP: %s -> sincere goodbye", e)
@@ -272,6 +267,63 @@ class Session:
 
     SNORES = ["Zzz... hnnnk... zzz...", "Mmm... five more minutes...", "Zzzzz... shhhh... zzz...",
               "Hnnnk... mmm... no... not the pasta... zzz...", "Zzz... ba-dum... ba-dum... zzz..."]
+
+    @property
+    def skip_provocation(self) -> bool:
+        return self.user.no_tease or not self.director.allowed_provocations
+
+    def scripted_stages(self):
+        """Stages 1-4 with the Director + writer (offline-capable)."""
+        if self.stage < 1:
+            self.stage1_wake()
+        if self.stage <= 2:
+            self.stage2_intro()
+        if self.stage <= 3:
+            self.stage3_conversation()
+        if self.skip_provocation:
+            logger.info("=== STAGE 4 skipped (no teasing for this participant / profile) ===")
+            self.log.event("stage", self.clock.now(), stage=4, skipped=True)
+        elif self.stage <= 4:
+            self.stage4_provocation()
+
+    def realtime_stages(self) -> bool:
+        """Stages 1-4 as one live conversation with the ElevenLabs agent. False = fall back to scripted."""
+        from .realtime import RealtimeConversation
+
+        self.enter(1)
+        if not self.hub.snapshot().pulse_present:
+            self.log.event("prompt", self.clock.now(), text=self.cfg.prompts["wake"])
+        while not self.hub.snapshot().pulse_present and not self.stage_over():
+            self.check_safety()
+            self.listener_peek()
+        self.body.wake_up()
+        self.body.wait()
+        u, d = self.user, self.director
+
+        def done() -> bool:
+            if self.stop_reason:
+                return True
+            if self.stage == 1 and (self.turns_in_stage >= 1 or self.stage_over()):
+                self.enter(2)
+            elif self.stage == 2 and ((u.name and u.language_confirmed) or self.turns_in_stage >= 6 or self.stage_over()):
+                self.enter(3)
+            elif self.stage == 3 and (self.turns_in_stage >= 5 or self.stage_over()):
+                if self.skip_provocation:
+                    self.log.event("stage", self.clock.now(), stage=4, skipped=True)
+                    return True
+                self.enter(4)
+            elif self.stage == 4 and (len(d.stage4_moves) >= self.cfg.provocation_moves or self.stage_over()):
+                return True
+            return False
+
+        try:
+            RealtimeConversation(self, self.realtime_agent).run(done)
+        except Exception as e:  # network / account / audio problems: never strand the participant
+            logger.exception("Realtime conversation failed; continuing with the scripted conversation")
+            self.log.event("sensor", self.clock.now(), text=f"Live conversation unavailable ({e}); switching to scripted mode.")
+            return False
+        self.check_safety()
+        return True
 
     def stage0_baseline(self):
         """Asleep and silent until a pulse arrives; then Reachy snores while the

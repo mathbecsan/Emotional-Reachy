@@ -43,6 +43,8 @@ def parse_args(argv=None) -> argparse.Namespace:
     p.add_argument("--listener", choices=["elevenlabs", "console", "mic", "scenario", "web"], default=None)
     p.add_argument("--scenario", default=None)
     p.add_argument("--voice", choices=["elevenlabs", "mac", "sim"], default="elevenlabs")
+    p.add_argument("--conversation", choices=["realtime", "scripted"], default="realtime",
+                   help="realtime: live ElevenLabs agent for stages 1-4; scripted: Director + templates/Claude")
     p.add_argument("--scale", type=float, default=1.0, help="speed up the session clock (simulation only)")
     p.add_argument("--ui-port", type=int, default=UI_PORT)
     p.add_argument("--debug", action="store_true")
@@ -67,7 +69,8 @@ def options_from_args(args: argparse.Namespace) -> SessionOptions:
     return SessionOptions(participant=args.participant, profile=args.profile, no_tease=args.no_tease,
                           llm=not args.no_llm, heart=args.heart, heart_port=args.heart_port,
                           pulse_mode=args.pulse_mode, camera=args.camera, listener=listener,
-                          scenario=args.scenario, voice=args.voice, time_scale=args.scale)
+                          scenario=args.scenario, voice=args.voice, time_scale=args.scale,
+                          conversation=args.conversation)
 
 
 def run(args: argparse.Namespace, robot=None, settings_app=None, stop_event: threading.Event | None = None) -> None:

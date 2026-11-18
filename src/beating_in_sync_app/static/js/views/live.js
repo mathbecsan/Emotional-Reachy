@@ -31,6 +31,9 @@ function startForm(onStarted) {
     h("option", { value: "elevenlabs" }, "Reachy's microphone (ElevenLabs) + typed"),
     h("option", { value: "web" }, "Typed here only (rehearsal / Wizard-of-Oz)"),
     h("option", { value: "mic" }, "Microphone (local Whisper)"));
+  const conversation = h("select", { name: "conversation" },
+    h("option", { value: "realtime" }, "Live & fluid (ElevenLabs agent with Reachy's personality)"),
+    h("option", { value: "scripted" }, "Scripted (Director + offline lines / Claude)"));
   const voice = h("select", { name: "voice" },
     h("option", { value: "elevenlabs" }, "ElevenLabs, from Reachy's speaker"),
     h("option", { value: "mac" }, "macOS voice"),
@@ -53,6 +56,7 @@ function startForm(onStarted) {
       field("Start language", lang, "Reachy switches to the participant's language in stage 2."),
       field("Heart", heart),
       portRow,
+      field("Conversation", conversation, "Live: Reachy listens continuously, answers anything, asks its own questions."),
       field("Participant speech", listener),
       field("Reachy voice", voice),
       field("Clock", scale, "Faster clocks are for rehearsals only."),
@@ -68,6 +72,7 @@ function startForm(onStarted) {
         participant: participant.value.trim(), profile: profile.value, language_hint: lang.value,
         no_tease: noTease.checked, llm: llm.checked, heart: heart.value, heart_port: port.value || null,
         camera: camera.checked, listener: listener.value, voice: voice.value, time_scale: Number(scale.value),
+        conversation: conversation.value,
       });
       onStarted();
     } catch (e) { toast(e.message, "error"); }
