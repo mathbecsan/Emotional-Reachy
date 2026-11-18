@@ -64,11 +64,13 @@ export function checkView(outlet, startKey) {
   }
 
   function setResult(key, value) {
+    if (value === "pass") delete repairs[key];
     results[key] = value; saveResults(results); drawMap(); navNext?.();
     window.dispatchEvent(new Event("refreshstatus"));
   }
 
   // ------------------------------------------------------------------ building blocks
+  const repairs = {};               // how many Repairs were run for each step (to escalate the advice)
   function feedback(isLast = false, always = false) {
     const box = h("div", { class: "feedback", hidden: true, role: "status" });
     const spoken = new Set();
@@ -85,9 +87,19 @@ export function checkView(outlet, startKey) {
         box.dataset.state = state;
         box.replaceChildren(h("span", { class: "feedback__icon", "aria-hidden": "true" }, state === "pass" ? "✓" : state === "fail" ? "!" : "…"),
           h("div", {}, h("strong", {}, title), meaning ? h("p", {}, meaning) : "", fix ? h("p", { class: "feedback__fix" }, h("b", {}, "Try this: "), fix) : "",
-            state === "fail" ? h("button", { type: "button", class: "btn btn--small feedback__repair", onclick: () => window.dispatchEvent(new Event("repair")) }, "🔧 Repair automatically") : ""));
+            state === "fail" ? afterRepair() : "",
+            state === "fail" ? h("div", { class: "btn-row feedback__actions" },
+              h("button", { type: "button", class: "btn btn--small", title: "Stop this test and start it again from scratch", onclick: () => show(idx) }, "↺ Reset this step"),
+              h("button", { type: "button", class: "btn btn--small", onclick: () => window.dispatchEvent(new Event("repair")) }, "🔧 Repair automatically")) : ""));
       },
     };
+  }
+  function afterRepair() {
+    const n = repairs[STEPS[idx]?.key] || 0;
+    if (!n) return "";
+    return h("p", { class: "feedback__escalate" }, n === 1
+      ? "Repair ran, but this still fails. Press ↺ Reset this step to start the test over. If it fails again, run 🔧 Repair once more."
+      : `Still failing after ${n} repairs. Reset this step once more; if it keeps failing, unplug that device (USB and power), wait 10 seconds, plug it back in, then Reset again.`);
   }
   function task(label) {
     const el = h("li", { class: "task" }, h("span", { class: "task__box", "aria-hidden": "true" }), h("span", {}, label));
@@ -210,7 +222,7 @@ export function checkView(outlet, startKey) {
           h("button", { type: "button", class: "btn", title: "Stop and restart the sensor reader (fixes most 'no signal' problems)", onclick: () => { retried = false; restart("Reconnecting to the sensors…"); } }, "↻ Reconnect sensors"),
           skipTwo));
       setCur(0);
-      fb.set("wait", "Connecting to the sensors…", "The Arduino restarts when it's opened: this takes about 3 seconds.");
+      fb.set("wait", "Connecting to the sensors…", "The Arduino restarts when it's opened: this can take up to 10 seconds.");
       const off = onEvent((e) => {
         if (e.kind !== "probe" || e.done) return;
         if (e.starting) return;
@@ -541,6 +553,13 @@ export function checkView(outlet, startKey) {
   api("/api/state").then((st) => { running = st.running; if (running) toast("A session is running: hardware tests resume once it ends.", "error"); }).catch(() => {});
   const onDebug = () => { drawMap(); navNext?.(); };
   window.addEventListener("debugchange", onDebug);
+  const onRepaired = () => {                    // Repair finished: re-run this step from scratch to see if it's fixed
+    if (idx >= STEPS.length) return;
+    const k = STEPS[idx].key;
+    repairs[k] = (repairs[k] || 0) + 1;
+    show(idx);
+  };
+  window.addEventListener("repairdone", onRepaired);
   show(idx);
-  return () => { stopCurrent?.(); window.removeEventListener("debugchange", onDebug); };
+  return () => { stopCurrent?.(); window.removeEventListener("debugchange", onDebug); window.removeEventListener("repairdone", onRepaired); };
 }

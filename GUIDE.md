@@ -143,6 +143,8 @@ Switch it off again before a participant sits down.
 ## When something goes wrong
 
 **First, press 🔧 Repair** (top right, on every page, or *Repair automatically* under any failed check).
+
+Every failed check shows two buttons: **↺ Reset this step** (starts that test over from scratch) and **🔧 Repair automatically**. When you close Repair, the step re-runs by itself to check the fix. If it still fails, the page says so: press **↺ Reset this step**, and if it fails again run **🔧 Repair** once more. After two repairs it tells you to unplug that device (USB and power), wait 10 seconds and plug it back in.
 It takes about 30 seconds and works through the usual causes, showing each step:
 
 1. checks no session is running;
@@ -162,7 +164,7 @@ Anything it can't fix is shown in orange, with what to do. If it's all green, ru
 |---|---|
 | Reachy talks but doesn't move | The robot software stopped. Turn the robot on in **Reachy Mini Control**, then **Check setup → Connect Reachy**. |
 | In a session, Reachy doesn't wake up when a finger is on the sensor | An orange bar on the session screen says the sensors aren't connected. The session keeps retrying by itself every few seconds, and the bar disappears when it connects. If it stays, check the Arduino's USB cable and close the Arduino IDE; **🔧 Repair** (after ending the session) checks everything. |
-| "No signal from the sensors" while fingers are on them | The page reconnects to the sensors by itself once. If it still says so, press **↻ Reconnect sensors** (it restarts the reader), then **🔧 Repair**, which reads the Arduino for 3 seconds and says exactly what's wrong. Close the Arduino IDE serial monitor if it's open: only one program can read the sensors. |
+| "No signal from the sensors" while fingers are on them | The Arduino restarts every time it's opened and can take up to 10 seconds to send its first reading; the page now waits for it. The page reconnects to the sensors by itself once. If it still says so, press **↻ Reconnect sensors** (it restarts the reader), then **🔧 Repair**, which reads the Arduino for 3 seconds and says exactly what's wrong. Close the Arduino IDE serial monitor if it's open: only one program can read the sensors. |
 | Finger on the sensor, nothing happens | **Check setup → Test sensors.** "No data" or "Sensor 1 not found" means a loose wire: check SDA→A4, SCL→A5, power and ground, then unplug and replug the Arduino's USB. |
 | "Finger detected" but no heart rate | Press more lightly and keep still. Cold fingers take longer. |
 | Reachy doesn't hear the participant | **Check setup → Record 4 seconds.** Speak closer to Reachy. |

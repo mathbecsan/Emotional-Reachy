@@ -184,6 +184,9 @@ def camera_names() -> list[str]:
     return [line.strip().rstrip(":") for line in out.splitlines() if line.startswith("    ") and not line.startswith("      ") and line.strip().endswith(":")]
 
 
+BOOT_GRACE = 12          # s allowed for the Nano's first line after the port opens
+
+
 class SensorProbe(threading.Thread):
     """Streams both pulse sensors to the UI (finger on/off, live BPM) for up to 90 s."""
 
@@ -246,11 +249,16 @@ class SensorProbe(threading.Thread):
                                         "raw": vals[i] if i < len(vals) else None})
                     # Only call it a failure when it lasts: right after the port opens the board resets
                     # and the first lines are garbage (that used to fail a re-test that was fine).
-                    stale = now - last_data > 4
+                    # The 4 s silence clock only starts once data has flowed: a slow-booting board
+                    # (it resets on every open) gets up to BOOT_GRACE s for its first line instead of
+                    # failing, and a retry (which resets it again) no longer repeats the same failure.
+                    booting = not vals and now - t0 < BOOT_GRACE
+                    stale = (now - last_data > 4) if vals else not booting
                     ok = not stale and problem is None
                     self.bus.emit("probe", ok=ok, port=port, sensors=sensors, left=round(self.seconds - (now - t0)),
-                                  starting=now - t0 < 4 and not vals,
-                                  detail=problem or ("Streaming" if ok else "No data from the Arduino for 4 seconds"),
+                                  starting=booting,
+                                  detail=problem or ("Streaming" if ok else ("No data from the Arduino for 4 seconds" if vals
+                                                     else f"The Arduino sent nothing for {BOOT_GRACE} seconds after connecting")),
                                   fix="" if ok else "Check the sensor's 4 wires (SDA→A4, SCL→A5, power, ground), then unplug and replug the Arduino's USB.")
         finally:
             ser.close()

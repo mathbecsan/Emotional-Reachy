@@ -805,3 +805,5 @@ body[data-view="title"] .shell__outlet, body[data-view="menu"] .shell__outlet { 
 .voice-toggle input:checked + .switch__ui::after { transform: translateX(18px); }
 .voice-toggle input:focus-visible + .switch__ui { outline: 2px solid var(--text); outline-offset: 2px; }
 .voice-toggle__note { display: block; font-size: 11px; opacity: 0.8; }
+.feedback__actions { margin-top: 8px; }
+.feedback__escalate { margin-top: 8px !important; padding: 8px 10px; border-radius: 10px; background: rgba(255, 201, 77, 0.1); color: var(--warn) !important; font-weight: 600; }
