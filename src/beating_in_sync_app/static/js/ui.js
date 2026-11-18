@@ -32,3 +32,13 @@ export function toast(message, kind = "info") {
   setTimeout(() => el.classList.add("toast--out"), 3200);
   setTimeout(() => el.remove(), 3800);
 }
+
+/** Debug mode: the technical panels (signals, Director reasoning, simulators) are only shown
+ * when it is on. Remembered per browser. */
+const DEBUG_KEY = "bis.debug";
+export function isDebug() { try { return localStorage.getItem(DEBUG_KEY) === "1"; } catch { return false; } }
+export function setDebug(on) {
+  try { localStorage.setItem(DEBUG_KEY, on ? "1" : "0"); } catch { /* private window */ }
+  document.body.classList.toggle("is-debug", on);
+  window.dispatchEvent(new CustomEvent("debugchange", { detail: on }));
+}

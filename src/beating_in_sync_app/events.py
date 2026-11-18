@@ -21,7 +21,7 @@ class EventBus:
     def emit(self, kind: str, **data: Any) -> None:
         event = {"kind": kind, "ts": time.time(), **data}
         with self._lock:
-            if kind != "heart":
+            if kind not in ("heart", "pulse", "probe"):   # high-rate streams stay out of the replay history
                 self.recent.append(event)
             self._update_state(event)
             subs = list(self._subs)

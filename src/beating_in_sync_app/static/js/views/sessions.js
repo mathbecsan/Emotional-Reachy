@@ -10,15 +10,15 @@ import { heartChart } from "../components/heart-chart.js";
 
 export function sessionsView(outlet) {
   const list = h("ul", { class: "sessions__list" });
-  outlet.replaceChildren(h("section", { class: "card sessions" },
-    h("h2", { class: "card__title" }, "Sessions"),
-    h("p", { class: "muted" }, "Each session is a JSONL log in sessions/: heartbeat, stage changes, every turn and why."),
-    list));
+  outlet.replaceChildren(h("div", { class: "page page--narrow" },
+    h("header", { class: "page__head" }, h("div", {}, h("h1", { class: "page__title" }, "Results"),
+      h("p", { class: "page__lede" }, "Open a session to replay the conversation and the heartbeat."))),
+    h("section", { class: "card sessions" }, list)));
   api("/api/sessions").then((items) => {
     if (!items.length) list.append(h("li", { class: "muted" }, "No sessions yet."));
     for (const s of items) {
       const [date, time, pid] = s.name.split(/[-_]/);
-      list.append(h("li", {}, h("a", { href: `#/sessions/${s.name}`, class: "sessions__item" },
+      list.append(h("li", {}, h("a", { href: `#/results/${s.name}`, class: "sessions__item" },
         h("strong", {}, pid || s.name), h("span", { class: "muted" }, `${date} ${time?.replace(/(\d\d)(\d\d)(\d\d)/, "$1:$2:$3")}`),
         h("span", { class: "muted" }, `${s.turns} turns`),
         h("a", { href: `#/projection/${s.name}`, class: "btn btn--small" }, "Project"))));

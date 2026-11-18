@@ -5,7 +5,7 @@ import { command } from "../api.js";
 import { MODES } from "../constants.js";
 
 export function personaStrip() {
-  const name = h("span", { class: "pstrip__name" }, "—");
+  const name = h("span", { class: "pstrip__name" }, "Not awake yet");
   const why = h("span", { class: "pstrip__why" });
   const list = h("ol", { class: "pstrip__list" });
   const send = (cmd, msg) => command(cmd).then(() => msg && toast(msg)).catch((e) => toast(e.message, "error"));
@@ -13,7 +13,7 @@ export function personaStrip() {
     h("div", { class: "pstrip__head" },
       h("div", {}, h("h2", { class: "card__title" }, "Personality now"), h("div", {}, name, why)),
       h("div", { class: "btn-row" },
-        h("button", { class: "btn", type: "button", title: "Glitch into the next persona", onclick: () => send("/next", "Switching…") }, "Next persona ⟶"),
+        h("button", { class: "btn", type: "button", title: "Glitch into the next persona", onclick: () => send("/next", "Switching…") }, "Next personality →"),
         h("button", { class: "btn", type: "button", title: "Back to Base Reachy for the rest of the session", onclick: () => send("/reset", "Back to Base Reachy") }, "Reset to Base"),
         h("button", { class: "btn btn--danger", type: "button", title: "Close as Base Reachy, then goodbye", onclick: () => send("/close", "Closing the interview") }, "Close interview"))),
     list);
@@ -28,7 +28,7 @@ export function personaStrip() {
           onclick: () => send(`/persona ${k}`, `Switching to ${m.label}…`) }, h("span", { class: "pstrip__n" }, i + 1), m.label));
     }));
     const m = MODES[current] || {};
-    name.textContent = m.label || "—";
+    name.textContent = m.label || "Not awake yet";
     root.style.setProperty("--accent", m.color || "#888");
   }
 

@@ -83,8 +83,12 @@ def run(args: argparse.Namespace, robot=None, settings_app=None, stop_event: thr
 
         # Speech and music play on this computer, so Reachy's media pipeline isn't needed
         # (and the daemon may run with --no-media, where initialising it hangs).
-        robot = ReachyMini(media_backend="no_media", **({"robot_name": args.robot_name} if args.robot_name else {}))
-        logger.info("Connected to Reachy Mini")
+        try:
+            robot = ReachyMini(media_backend="no_media", **({"robot_name": args.robot_name} if args.robot_name else {}))
+            logger.info("Connected to Reachy Mini")
+        except Exception as e:  # daemon not running yet: start anyway, connect later from Check setup
+            logger.error("Reachy not reachable (%s). Start it in Reachy Mini Control, then press Connect Reachy.", e)
+            robot = None
     runner = SessionRunner(bus, cfg, robot)
 
     if args.headless:

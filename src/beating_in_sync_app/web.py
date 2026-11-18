@@ -15,6 +15,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+from . import checks
 from .body.gestures import EXPRESS_GESTURES, GESTURES
 from .brain.personas import BASE, DEFAULT_ORDER, catalog
 from .config import Config
@@ -113,6 +114,71 @@ def mount_routes(app: FastAPI, runner: SessionRunner, bus: EventBus, cfg: Config
             raise HTTPException(409, str(e)) from e
         return {"status": "playing", "gesture": name}
 
+    # ------------------------------------------------------------ Check setup
+    probe = {"thread": None}
+
+    def idle() -> None:
+        if runner.running:
+            raise HTTPException(409, "A session is running: tests are available once it ends.")
+
+    @app.get("/api/check")
+    async def check_all() -> dict:
+        return await asyncio.to_thread(checks.quick, runner)
+
+    @app.post("/api/check/connect")
+    async def check_connect() -> dict:
+        idle()
+        try:
+            await asyncio.to_thread(runner.connect_robot)
+        except Exception as e:  # SDK raises several error types when the daemon is down
+            return {"ok": False, "detail": "Couldn't connect", "fix": f"Turn the robot on in Reachy Mini Control first. ({e})"}
+        return {"ok": True, "detail": "Connected"}
+
+    @app.post("/api/check/move")
+    async def check_move() -> dict:
+        try:
+            runner.preview_gesture("nod_yes")
+        except RuntimeError as e:
+            return {"ok": False, "detail": str(e), "fix": "Connect Reachy first."}
+        return {"ok": True, "detail": "Reachy nodded. Did you see it move?"}
+
+    @app.post("/api/check/speaker")
+    async def check_speaker() -> dict:
+        idle()
+        return await asyncio.to_thread(checks.speak)
+
+    @app.post("/api/check/mic")
+    async def check_mic() -> dict:
+        idle()
+        try:
+            return await asyncio.to_thread(checks.listen)
+        except Exception as e:  # PortAudio errors when no input device
+            return {"ok": False, "detail": f"Microphone error: {e}", "fix": "Check Reachy's USB audio connection."}
+
+    @app.post("/api/check/camera")
+    async def check_camera() -> dict:
+        idle()
+        return await asyncio.to_thread(checks.camera, cfg.camera_index)
+
+    @app.post("/api/check/sensors")
+    async def check_sensors(body: dict | None = None) -> dict:
+        idle()
+        t = probe["thread"]
+        if t is not None and t.is_alive():
+            t.stop_event.set()
+            t.join(timeout=2)
+        port = (body or {}).get("port") or cfg.heart_port
+        probe["thread"] = checks.SensorProbe(bus, port)
+        probe["thread"].start()
+        return {"ok": True, "detail": "Listening to the sensors for 90 s"}
+
+    @app.post("/api/check/sensors/stop")
+    async def check_sensors_stop() -> dict:
+        t = probe["thread"]
+        if t is not None:
+            t.stop_event.set()
+        return {"ok": True}
+
     @app.get("/api/presets")
     async def presets() -> list[dict]:
         out = []
@@ -154,6 +220,10 @@ def mount_routes(app: FastAPI, runner: SessionRunner, bus: EventBus, cfg: Config
         known = {f.name for f in fields(SessionOptions)}
         try:
             o = SessionOptions(**{k: v for k, v in opts.items() if k in known})
+            t = probe["thread"]
+            if t is not None and t.is_alive():   # free the Arduino port for the session
+                t.stop_event.set()
+                await asyncio.to_thread(t.join, 3)
             runner.start(o)
         except (RuntimeError, FileNotFoundError, TypeError) as e:
             raise HTTPException(409, str(e)) from e

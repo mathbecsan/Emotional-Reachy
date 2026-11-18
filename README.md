@@ -154,30 +154,25 @@ one voice, so it feels like one robot losing control of its personality.
   sends Reachy back to Base at once; a second discomfort cue drops every teasing persona.
 - Works offline too (scripted conversation): the same cast speaks its scripted lines.
 
-## Facilitator UI
+## Web app
 
-- **Build session**: pick the script (Off-Brand Reachy, Beating in Sync, Gentle),
-  choose which personalities take part and their order (drag, arrows, add/remove;
-  Base Reachy always opens and closes), exchanges per persona, heartbeat wake-up
-  on/off, music on/off, no-teasing, and the hardware. Save it as a **preset**
-  (`presets/*.json`) to repeat a test condition exactly; four presets ship with the repo.
-  For Beating in Sync the personalities are the stage-4 persona moves (Flirty,
-  Teasing, Offended, Scolding).
-- **Personalities**: the catalog, filterable, with each persona's script and a
-  "Try a gesture" button that moves the robot.
-- **Live**: in persona sessions a strip shows the cast (done / now / next); click
-  a persona to jump to it, or use Next persona, Reset to Base, Close interview.
-  Also: stage strip with protocol countdown, Reachy's mode/act and *why*,
-  heart chart (baseline band, stage bands, a dot per Reachy turn, ringed when
-  the heart triggered it), both pulse sensors, conversation log with detected
-  emotion and cues, what Reachy knows, and controls: Next stage, Scold now
-  (if the camera attention check is unreliable), **Pause** (= the stop word:
-  sincere goodbye, sleep). Participant lines can be typed (rehearsal / Wizard-of-Oz)
-  or come from the microphone.
-- **Sessions**: replay with the moves the participant actually saw (for the
-  post-interview) and which reactions came from their heartbeat (for the debrief);
-  persona sessions list each persona with replies, laughs and peak BPM, and resets.
-- **Projection**: stage 7 — the heartbeat as colour and waves, full screen (F).
+**Running sessions? Start with [GUIDE.md](GUIDE.md)**, a step-by-step guide for anyone on the team.
+
+The app at http://localhost:7860 follows four steps:
+
+1. **Check setup**: Reachy (connect + test move), live pulse sensors (finger + BPM),
+   speaker, microphone (records and transcribes), camera, voice service. Each
+   failing row says what to do. `/api/check*` backs it.
+2. **New session**: a wizard (Experience → Personalities → Behaviour → Start)
+   with saved setups (`presets/*.json`). Behaviour covers gesture size and speed,
+   personality switch pace, teasing, heartbeat wake-up, face reactions and music.
+3. **Session**: Reachy's status, the personality strip with jump / next / reset /
+   close, the heart rate and the conversation.
+4. **Results**: replays with per-personality reactions; full-screen projection.
+
+**Debug** (header switch) reveals the technical panels: stage timeline, heart
+chart, sensor waveforms, Director reasoning, user model, simulators, and the
+hardware options in the wizard.
 
 ## Safety (from the protocol)
 

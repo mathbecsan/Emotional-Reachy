@@ -10,18 +10,24 @@
   </head>
   <body>
     <header class="shell__header">
-      <a href="#/" class="shell__brand" aria-label="Live session">
+      <a href="#/" class="shell__brand" aria-label="Home">
         <span class="shell__pulse" data-component="pulse-dot" aria-hidden="true"></span>
         <span>Beating in Sync</span>
       </a>
-      <nav class="shell__nav">
-        <a href="#/" data-nav="live">Live</a>
-        <a href="#/build" data-nav="build">Build session</a>
-        <a href="#/personas" data-nav="personas">Personalities</a>
-        <a href="#/sessions" data-nav="sessions">Sessions</a>
-        <a href="#/projection" data-nav="projection">Projection</a>
+      <nav class="shell__nav" aria-label="Steps">
+        <a href="#/check" data-nav="check"><span class="shell__step">1</span>Check setup</a>
+        <a href="#/new" data-nav="new"><span class="shell__step">2</span>New session</a>
+        <a href="#/session" data-nav="session"><span class="shell__step">3</span>Session</a>
+        <a href="#/results" data-nav="results"><span class="shell__step">4</span>Results</a>
       </nav>
-      <span class="shell__conn" data-component="conn" title="Connection to the app">offline</span>
+      <div class="shell__right">
+        <a href="#/check" class="status-pills" data-component="status" title="Setup status: open Check setup"></a>
+        <label class="debug-toggle" title="Show the technical panels (sensor signals, Director reasoning, simulators)">
+          <input type="checkbox" data-component="debug" />
+          <span class="switch__ui" aria-hidden="true"></span>
+          <span>Debug</span>
+        </label>
+      </div>
     </header>
     <main id="view-outlet" class="shell__outlet"></main>
   </body>

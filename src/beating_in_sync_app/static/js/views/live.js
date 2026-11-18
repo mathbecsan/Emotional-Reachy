@@ -14,16 +14,19 @@ import { sensorPanel } from "../components/sensor-panel.js";
 import { personaStrip } from "../components/persona-strip.js";
 
 function idlePanel() {
-  const presets = h("div", { class: "idle__presets" });
-  api("/api/presets").then((ps) => presets.replaceChildren(...ps.map((p) => h("a", { class: "idle__preset", href: `#/build/${encodeURIComponent(p.id)}` },
-    h("strong", {}, p.name), p.description ? h("small", {}, p.description) : null)))).catch(() => {});
-  return h("section", { class: "start card idle" },
-    h("div", { class: "idle__head" },
-      h("div", {}, h("h2", { class: "card__title" }, "No session running"),
-        h("p", { class: "start__lede" }, "Build a session: pick the script, the personalities and their order, the participant and the hardware. Reachy starts asleep; a heartbeat wakes it.")),
-      h("a", { class: "btn btn--primary", href: "#/build" }, "Build a session")),
-    h("h3", { class: "card__sub" }, "Or start from a preset"), presets);
+  return h("section", { class: "card idle" },
+    h("h2", { class: "idle__title" }, "No session running"),
+    h("p", { class: "muted" }, "Check the setup, then start a new session."),
+    h("div", { class: "btn-row" },
+      h("a", { class: "btn btn--primary btn--big", href: "#/new" }, "New session"),
+      h("a", { class: "btn btn--big", href: "#/check" }, "Check setup")));
 }
+
+const STATUS = {
+  0: "Asleep · ask the participant to rest a finger on a pulse sensor",
+  1: "Waking up…", 2: "Getting to know the participant", 3: "In conversation", 4: "In conversation",
+  5: "Music and dance", 6: "Saying goodbye", 7: "Finished",
+};
 
 function controls(getLang) {
   const btn = (label, cmd, cls = "", title = "") => h("button", {
@@ -77,6 +80,19 @@ export function liveView(outlet) {
   const who = h("dl", { class: "who" });
   const ctl = controls();
   const banner = h("div", { class: "banner", hidden: true });
+  const status = h("p", { class: "live__status" }, "Waiting for a session");
+  const actions = h("div", { class: "btn-row live__actions" },
+    h("button", { class: "btn", type: "button", title: "Skip ahead (next personality, or next stage)",
+      onclick: () => command("/next").catch((e) => toast(e.message, "error")) }, "Skip ahead"),
+    h("button", { class: "btn btn--danger", type: "button", title: "Reachy says goodbye kindly and goes to sleep",
+      onclick: () => { if (confirm("End the session now? Reachy will say goodbye and go to sleep.")) command("/pause").catch((e) => toast(e.message, "error")); } }, "End session"));
+  timeline.el.classList.add("debug-only");
+  sensors.el.classList.add("debug-only");
+  chart.el.classList.add("debug-only");
+  modeWhy.classList.add("debug-only");
+  modeAct.classList.add("debug-only");
+  bpmMeta.classList.add("debug-only");
+  ctl.el.classList.add("debug-only");
 
   const layout = h("div", { class: "live" },
     timeline.el,
@@ -85,13 +101,13 @@ export function liveView(outlet) {
     h("div", { class: "live__cols" },
       h("div", { class: "live__left" },
         h("section", { class: "card mode" }, face.el,
-          h("div", { class: "mode__text" }, h("div", {}, modeName, modeAct), modeWhy)),
+          h("div", { class: "mode__text" }, h("div", {}, modeName, modeAct), status, modeWhy, actions)),
         h("section", { class: "card heart" },
           h("div", { class: "heart__head" }, h("h2", { class: "card__title" }, "Heart"), h("div", {}, bpmNow, h("span", { class: "heart__unit" }, " BPM")), bpmMeta),
           chart.el, safety),
         sensors.el),
       h("div", { class: "live__right" }, log.el,
-        h("section", { class: "card" }, h("h2", { class: "card__title" }, "What Reachy knows"), who),
+        h("section", { class: "card debug-only" }, h("h2", { class: "card__title" }, "What Reachy knows"), who),
         ctl.el)));
 
   const startWrap = h("div", { class: "start-wrap" });
@@ -129,7 +145,7 @@ export function liveView(outlet) {
       case "snapshot": {
         setRunning(!!e.running);
         const st = e.state || {};
-        if (st.stage != null) timeline.set(st.stage, st.stage_started, st.stage_seconds);
+        if (st.stage != null) { timeline.set(st.stage, st.stage_started, st.stage_seconds); if (e.running) status.textContent = STATUS[st.stage] || ""; }
         if (st.mode) { face.setMode(st.mode); modeName.textContent = MODES[st.mode]?.label || st.mode; modeAct.textContent = ` · ${st.act}`; modeWhy.textContent = st.why; }
         renderUser(st.user);
         for (const ev of e.recent || []) replayInto(ev);
@@ -143,9 +159,10 @@ export function liveView(outlet) {
         } else {
           setRunning(false);
           banner.hidden = false;
-          banner.replaceChildren(h("span", {}, "Session ended. "), h("a", { href: `#/sessions/${(e.log || "").split("/").pop().replace(".jsonl", "")}` }, "Open the replay"),
+          banner.replaceChildren(h("span", {}, "Session ended. "), h("a", { href: `#/results/${(e.log || "").split("/").pop().replace(".jsonl", "")}` }, "Open the replay"),
             h("span", {}, " · "), h("a", { href: "#/projection" }, "Projection"));
           face.setMode("sleepy"); modeName.textContent = "Asleep"; modeAct.textContent = "";
+          status.textContent = "Session finished";
           showStart();
         }
         break;
@@ -174,9 +191,10 @@ export function liveView(outlet) {
     switch (e.kind) {
       case "stage":
         timeline.set(e.stage, e.ts, e.seconds);
+        status.textContent = STATUS[e.stage] || "";
         if (e.skipped) timeline.skip(e.stage);
         chart.addStage(e.t, e.stage);
-        log.note(`Stage ${e.stage}${e.skipped ? " skipped" : ""}`, "line--stage");
+        log.note(`Stage ${e.stage}${e.skipped ? " skipped" : ""}`, "line--stage line--debug");
         break;
       case "stage_clock": timeline.set(e.stage, e.ts, e.seconds); break;
       case "cast": strip.setCast(e.cast); break;
@@ -198,10 +216,14 @@ export function liveView(outlet) {
       case "listening": face.listen(true); break;
       case "heard": face.listen(false); log.participant(e); break;
       case "user": renderUser(e.user); break;
-      case "prompt": log.note(e.text, "line--prompt"); toast(e.text); break;
+      case "prompt": log.note(e.text, "line--prompt"); break;
       case "command": log.note(`facilitator: ${e.cmd}`, "line--cmd"); break;
       case "stop": log.note(`STOP — ${e.reason}`, "line--stop"); toast(`Stopped: ${e.reason}`, "error"); break;
-      case "sensor": log.note(e.text, "line--prompt"); break;
+      case "sensor":
+        log.note(e.text, "line--prompt");
+        if (/starts snoring/.test(e.text)) status.textContent = "Snoring · learning their resting heartbeat (about a minute)";
+        if (/unavailable|not found/i.test(e.text)) toast(e.text, "error");
+        break;
       case "error": toast(e.message, "error"); break;
     }
   }

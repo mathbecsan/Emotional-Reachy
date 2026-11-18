@@ -38,7 +38,24 @@ MODE_EMOTIONS = {
 KEYFRAMES_FIRST = {"flirty", "offended", "scolding", "wake", "to_sleep", "listen", "think", "attend"}
 
 
+def styled(seq, intensity: float = 1.0, speed: float = 1.0) -> list:
+    """Scale a keyframe sequence: intensity = size of the motion (0.3-1.3), speed = tempo (0.5-1.5).
+    Head yaw stays within 60 deg of the body and the body within +-160 (SDK limits)."""
+    if intensity == 1.0 and speed == 1.0:
+        return list(seq)
+    out = []
+    for p in seq:
+        body = max(-160.0, min(160.0, p.body_yaw * intensity))
+        yaw = max(body - 60.0, min(body + 60.0, p.yaw * intensity))
+        out.append(Pose(p.roll * intensity, p.pitch * intensity, yaw, p.z * intensity, p.x * intensity,
+                        (p.ant[0] * intensity, p.ant[1] * intensity), body, max(0.08, p.dur / speed)))
+    return out
+
+
 class BaseBody:
+    intensity = 1.0     # session settings from the builder ("How Reachy moves")
+    speed = 1.0
+
     def __init__(self) -> None:
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
@@ -58,6 +75,7 @@ class BaseBody:
 
     def _runner(self, name_or_seq, loop, stop):
         seq = GESTURES.get(name_or_seq, GESTURES["curious"]) if isinstance(name_or_seq, str) else name_or_seq
+        seq = styled(seq, self.intensity, self.speed)
 
         def run() -> None:
             while True:
@@ -143,7 +161,7 @@ class ReachyMiniBody(BaseBody):
                 def run() -> None:
                     while True:
                         t0 = time.monotonic()
-                        while not stop.is_set() and (t := time.monotonic() - t0) < move.duration:
+                        while not stop.is_set() and (t := (time.monotonic() - t0) * self.speed) < move.duration:
                             head, antennas, body_yaw = move.evaluate(t)
                             self._set_target(head, antennas, body_yaw)
                             time.sleep(1.0 / CONTROL_HZ)

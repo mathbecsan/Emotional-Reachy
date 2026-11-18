@@ -53,6 +53,8 @@ class SessionOptions:
     switch_every: int | None = None     # Off-Brand: exchanges per persona; None = profile default
     heart_wake: bool = True             # Reachy sleeps (and snores) until a heartbeat arrives
     music: bool | None = None           # stage 5 dance; None = profile default
+    motion_intensity: float = 1.0       # how big Reachy's gestures are (0.3 subtle - 1.3 dramatic)
+    motion_speed: float = 1.0           # how fast they play (0.5 slow - 1.5 fast)
 
 
 class SessionRunner:
@@ -140,7 +142,16 @@ class SessionRunner:
                 writer.notify = lambda message: self.bus.emit("error", message=message)
             except anthropic.AnthropicError as e:
                 logger.warning("Claude client unavailable (%s); using offline templates.", e)
+        if self.robot is not None and not self.robot_ok():
+            try:                       # the daemon restarted since we connected: reconnect once
+                self.connect_robot()
+            except Exception as e:     # still unreachable: the session runs, Reachy just won't move
+                logger.error("Reachy unreachable: %s", e)
+                self.bus.emit("error", message="Reachy isn't reachable: the session runs without movement. "
+                                               "Turn the robot on in Reachy Mini Control.")
         body = ReachyMiniBody(self.robot, cfg.use_emotion_library, rng) if self.robot is not None else SimBody(clock)
+        body.intensity = max(0.3, min(1.3, float(opts.motion_intensity)))
+        body.speed = max(0.5, min(1.5, float(opts.motion_speed)))
         has_el = elevenlabs.api_key() is not None
         if (opts.voice == "elevenlabs" or opts.listener == "elevenlabs") and not has_el:
             self.bus.emit("error", message="No ELEVENLABS_API_KEY in .env: using the macOS voice and typed input.")
@@ -188,13 +199,38 @@ class SessionRunner:
             raise RuntimeError("no session listening for typed input")
         self.web_listener.push(text, language)
 
+    def robot_ok(self) -> bool:
+        """True if the robot link still answers (the daemon may have restarted since we connected)."""
+        if self.robot is None:
+            return False
+        try:
+            self.robot.get_current_joint_positions()
+            return True
+        except Exception:  # SDK raises ConnectionError / TimeoutError / RuntimeError when the daemon is gone
+            return False
+
+    def connect_robot(self, robot_name: str | None = None) -> None:
+        """(Re)connect to Reachy, e.g. after the daemon was restarted. No session may be running."""
+        if self.running:
+            raise RuntimeError("stop the session first")
+        from reachy_mini import ReachyMini
+
+        old, self.robot, self._preview_body = self.robot, None, None
+        if old is not None:
+            try:
+                old.client.disconnect()
+            except Exception as e:  # stale link: nothing to clean up
+                logger.debug("old robot link: %s", e)
+        self.robot = ReachyMini(media_backend="no_media", **({"robot_name": robot_name} if robot_name else {}))
+        logger.info("Connected to Reachy Mini")
+
     def preview_gesture(self, name: str) -> None:
         """Try a gesture from the persona catalog (on the running session's body, or a spare one)."""
         if self.session is not None and self.running:
             self.session.body.play(name)
             return
         if self.robot is None:
-            raise RuntimeError("no robot connected (start the app with --robot)")
+            raise RuntimeError("Reachy isn't connected: press Connect Reachy on the Check setup page")
         if getattr(self, "_preview_body", None) is None:
             self._preview_body = ReachyMiniBody(self.robot, use_emotion_library=False)
         self._preview_body.play(name)
