@@ -198,6 +198,7 @@ class RealtimeConversation:
         self.last_agent_t = 0.0
         self.last_silence_action = 0.0
         self.sense_t: dict[str, float] = {}
+        self.last_direct, self.last_direct_t, self.direct_retries = "", 0.0, 0
         session.rt = self
 
     # ---------------------------------------------------------------- plumbing
@@ -221,6 +222,7 @@ class RealtimeConversation:
         (live tests: the agent ignored a switch request sent that way); a marked [Director]
         turn is followed right away -- the prompt says such turns are never the participant."""
         logger.info("director -> agent: %s", text)
+        self.last_direct, self.last_direct_t, self.direct_retries = text, time.monotonic(), 0
         self.send({"type": "user_message", "text": text})
         self.s.log.event("director_note", self.s.clock.now(), text=text)
 
@@ -310,10 +312,12 @@ class RealtimeConversation:
         show, s = self.show, self.s
         if show is None:
             return "no persona cast in this session", True
-        if key == BASE and (self.closing_t or show.reset_mode):
-            pass                                   # closing / reset: already Base
-        elif key == BASE:
-            show.reset(reason)
+        if key == BASE:
+            # Resets are decided here (stop word, distress, facilitator), never by the agent alone:
+            # live test P03 -- the agent called base on its own and the tour stopped.
+            if not (self.closing_t or show.reset_mode) and self.switch_pending != BASE:
+                return ("Stay in the tour: you are " + show.current.name + ". Only switch when the Director says so."
+                        if show.current.key != BASE else "You are already Base Reachy. Keep going."), False
         elif key not in show.cast:
             nxt = show.upcoming
             return (f"{key} is not in your cast. Use {nxt.key} ({nxt.name}) instead." if nxt
@@ -355,6 +359,7 @@ class RealtimeConversation:
             self.direct_switch("facilitator")
         elif kind == "reset":
             show.reset("facilitator")
+            self.switch_pending = BASE
             self.direct("[Director] Reset now: call reachy_switch_persona with base and say: "
                          "\"Got it, back to normal Reachy. Thanks for playing.\" Then continue warmly as Base Reachy.")
         elif kind == "jump" and key in PERSONAS:
@@ -391,6 +396,7 @@ class RealtimeConversation:
             if "discomfort" not in ana.cues:
                 s.user.discomfort_count += 1
             show.reset("distress")
+            self.switch_pending = BASE
             if s.user.discomfort_count >= s.cfg.discomfort_limit:
                 show.drop_teasing()
             self.direct("[Director] They seem uncomfortable. Call reachy_switch_persona with base right now and say "
@@ -429,6 +435,13 @@ class RealtimeConversation:
             self.sense_t["sad"] = now
             self.context("[Reachy senses] They look sad. Check in gently; if something is really wrong, "
                          "switch to Base Reachy and be kind.")
+        # A [Director] turn sent while Reachy is talking can be dropped (live test P03):
+        # if the switch hasn't happened 10 s later and Reachy is quiet, send it again (twice at most).
+        if (self.switch_pending and self.last_direct and now > self.speaking_until + 1.0
+                and now - self.last_direct_t > 10 and self.direct_retries < 2):
+            retries = self.direct_retries + 1
+            self.direct(self.last_direct)
+            self.direct_retries = retries
         idle = now - max(self.last_user_t, self.speaking_until)
         if idle > 11 and now - self.last_silence_action > 15 and not self.closing_t and self.switch_pending is None:
             self.last_silence_action = now

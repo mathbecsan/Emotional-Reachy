@@ -159,3 +159,12 @@ def test_api_personas_and_presets(tmp_path, monkeypatch):
     assert client.delete("/api/presets/pilot-a").status_code == 200
     assert client.post("/api/gesture/nope").status_code == 404
     assert client.post("/api/gesture/eye_roll").status_code == 409          # no robot in tests
+
+
+def test_agent_cannot_reset_the_tour_on_its_own():
+    s, rc = persona_rc()
+    rc._on_tool({"tool_name": "reachy_switch_persona", "tool_call_id": "x", "parameters": {"persona": "base"}})
+    assert not s.show.reset_mode and s.show.upcoming.key == "noir"     # live test P03: tour kept going
+    rc.persona_command("reset")
+    rc.switch_to("base", "agent")
+    assert s.show.reset_mode
