@@ -8,6 +8,7 @@ import io
 import logging
 import os
 import queue
+import threading
 import time
 import wave
 from typing import Optional
@@ -16,6 +17,8 @@ import httpx
 
 from .body.voice import MacVoice
 from .perception.speech import Utterance
+
+PLAY_MARGIN_S = 12.0     # speech may run this long past its expected length before it's cut off
 
 
 logger = logging.getLogger(__name__)
@@ -100,19 +103,45 @@ class ElevenLabsVoice(MacVoice):
     def _play_stream(self, body) -> bool:
         """Play audio as it arrives: Reachy starts talking after the first chunk, not the whole sentence."""
         np = self.np
+        # Watchdog: a stalled audio device used to block out.write() forever, freezing the whole
+        # session (no next stage, /pause ignored). Past a generous deadline the stream is aborted
+        # and the session carries on.
+        deadline = PLAY_MARGIN_S + len(body.get("text", "")) / 6.0
+        stuck = threading.Event()
         with self._stream(body) as r:
             if r.status_code >= 400:
                 r.read()
                 r.raise_for_status()
             with self.sd.OutputStream(samplerate=self.RATE, channels=2, dtype="float32", device=self.device) as out:
-                carry = b""
-                for chunk in r.iter_bytes():
-                    chunk = carry + chunk
-                    usable = len(chunk) - len(chunk) % 2
-                    chunk, carry = chunk[:usable], chunk[usable:]
-                    if chunk:
-                        pcm = np.frombuffer(chunk, dtype="<i2").astype("float32") / 32768.0
-                        out.write(np.repeat(pcm[:, None], 2, axis=1))
+                def abort():
+                    stuck.set()
+                    try:
+                        out.abort()
+                    except Exception:
+                        pass
+                timer = threading.Timer(deadline, abort)
+                timer.daemon = True
+                timer.start()
+                try:
+                    carry = b""
+                    for chunk in r.iter_bytes():
+                        if stuck.is_set():
+                            break
+                        chunk = carry + chunk
+                        usable = len(chunk) - len(chunk) % 2
+                        chunk, carry = chunk[:usable], chunk[usable:]
+                        if chunk:
+                            pcm = np.frombuffer(chunk, dtype="<i2").astype("float32") / 32768.0
+                            try:
+                                out.write(np.repeat(pcm[:, None], 2, axis=1))
+                            except self.sd.PortAudioError:
+                                if stuck.is_set():
+                                    break
+                                raise
+                finally:
+                    timer.cancel()
+        if stuck.is_set():
+            logger.warning("Speech playback stalled for %.0f s; cut it off so the session continues", deadline)
         return True
 
 

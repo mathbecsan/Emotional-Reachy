@@ -81,7 +81,12 @@ class SessionRunner:
     def start(self, opts: SessionOptions) -> None:
         if self.running:
             raise RuntimeError("a session is already running")
-        session, listener, analyzer = self.build(opts)
+        self.bus.emit("session", status="starting")      # clears the screens and the replay history
+        try:
+            session, listener, analyzer = self.build(opts)
+        except Exception as e:
+            self.bus.emit("session", status="failed", message=str(e))
+            raise
         self.session = session
 
         def run() -> None:

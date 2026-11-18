@@ -172,3 +172,61 @@ def test_pulse_sensor_missing_loop_resets_the_board(monkeypatch):
     with pytest.raises(RuntimeError, match="Sensor 2 not found"):
         src._read_lines(Missing())
     assert src.log.texts == []                # nothing logged per line; run() reports it once
+
+
+def test_new_session_starts_with_an_empty_history():
+    from beating_in_sync_app.events import EventBus
+
+    bus = EventBus()
+    bus.emit("session", status="running")
+    bus.emit("say", text="old chat")
+    bus.emit("session", status="ended", log="x.jsonl")
+    bus.emit("session", status="starting")
+    bus.emit("cast", cast=["base"])
+    snap = bus.snapshot()
+    assert [e["kind"] for e in snap["recent"]] == ["session", "cast"]
+    assert snap["state"]["running"]
+
+
+def test_stalled_speaker_does_not_freeze_the_session(monkeypatch):
+    """A stalled audio device used to block forever; playback must give up after its deadline."""
+    import contextlib
+    import threading as th
+    from beating_in_sync_app import elevenlabs as el
+
+    monkeypatch.setattr(el, "PLAY_MARGIN_S", 0.3)
+
+    class PortAudioError(Exception):
+        pass
+
+    class Out:
+        def __init__(self, *a, **k):
+            self.gate = th.Event()
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def write(self, data):
+            self.gate.wait()                 # the device never takes the audio...
+            raise PortAudioError("aborted")  # ...until abort() unblocks it
+
+        def abort(self):
+            self.gate.set()
+
+    class Resp:
+        status_code = 200
+
+        def iter_bytes(self):
+            yield b"\x00\x01" * 800
+
+    voice = el.ElevenLabsVoice.__new__(el.ElevenLabsVoice)
+    voice.np = __import__("numpy")
+    voice.sd = type("SD", (), {"OutputStream": Out, "PortAudioError": PortAudioError})
+    voice.device = None
+    voice._stream = lambda body: contextlib.nullcontext(Resp())
+    t = time.monotonic()
+    assert voice._play_stream({"text": "zz"}) is True
+    assert time.monotonic() - t < 3

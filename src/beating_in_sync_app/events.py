@@ -21,6 +21,8 @@ class EventBus:
     def emit(self, kind: str, **data: Any) -> None:
         event = {"kind": kind, "ts": time.time(), **data}
         with self._lock:
+            if kind == "session" and data.get("status") == "starting":
+                self.recent.clear()      # a new session starts from zero (the old one stays in its log file)
             if kind not in ("heart", "pulse", "probe", "track", "mobility", "repair"):   # high-rate streams stay out of the replay history
                 self.recent.append(event)
             self._update_state(event)
@@ -31,7 +33,7 @@ class EventBus:
     def _update_state(self, e: dict[str, Any]) -> None:
         k = e["kind"]
         if k == "session":
-            self.state = {"running": e.get("status") == "running", **{x: e.get(x) for x in ("participant", "profile", "sim", "llm")}}
+            self.state = {"running": e.get("status") in ("starting", "running"), **{x: e.get(x) for x in ("participant", "profile", "sim", "llm")}}
         elif k == "stage":
             self.state.update(stage=e["stage"], stage_started=e["ts"], stage_seconds=e.get("seconds"))
         elif k == "turn":

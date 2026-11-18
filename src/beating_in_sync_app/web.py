@@ -440,6 +440,14 @@ def mount_routes(app: FastAPI, runner: SessionRunner, bus: EventBus, cfg: Config
 
 
 def create_app(runner: SessionRunner, bus: EventBus, cfg: Config, warm_audio: bool | None = None) -> FastAPI:
+    try:   # `kill -USR1 <server pid>` writes every thread's stack to the server log (for hangs)
+        import faulthandler
+        import signal
+        import sys
+
+        faulthandler.register(signal.SIGUSR1, file=sys.stderr, all_threads=True)
+    except (AttributeError, ValueError, RuntimeError):
+        pass
     import os
 
     app = FastAPI(title="Beating in Sync")

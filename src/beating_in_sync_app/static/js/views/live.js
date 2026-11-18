@@ -162,6 +162,17 @@ export function liveView(outlet) {
       ...row("Heart moments", (u.heart_moments || []).join(" · ") || null));
   }
 
+  function clearAll() {
+    // Everything on this screen belongs to one session: wipe it so a new session starts from zero.
+    chart.reset(); log.reset(); timeline.reset(); sensors.reset(); strip.reset();
+    baseline = null; overSince = null;
+    sensorWarn.hidden = true; banner.hidden = true; safety.hidden = true;
+    bpmNow.textContent = "––"; bpmNow.classList.remove("heart__bpm--high"); bpmMeta.textContent = "no baseline yet";
+    who.replaceChildren();
+    face.setMode("sleepy"); modeName.textContent = "Asleep"; modeAct.textContent = ""; modeWhy.textContent = "Waiting for a session.";
+    status.textContent = "Waiting for a session";
+  }
+
   function handle(e) {
     switch (e.kind) {
       case "snapshot": {
@@ -169,13 +180,19 @@ export function liveView(outlet) {
         const st = e.state || {};
         if (st.stage != null) { timeline.set(st.stage, st.stage_started, st.stage_seconds); if (e.running) status.textContent = STATUS[st.stage] || ""; }
         if (st.mode) { face.setMode(st.mode); modeName.textContent = MODES[st.mode]?.label || st.mode; modeAct.textContent = ` · ${st.act}`; modeWhy.textContent = st.why; }
+        if (!e.running) { clearAll(); break; }   // no session: a clean screen (past sessions live in Results)
         renderUser(st.user);
         for (const ev of e.recent || []) replayInto(ev);
         break;
       }
       case "session":
-        if (e.status === "running") {
-          chart.reset(); log.reset(); timeline.reset(); sensors.reset(); strip.reset(); baseline = null; sensorWarn.hidden = true;
+        if (e.status === "starting") {
+          clearAll();
+          status.textContent = "Starting the session…";
+        } else if (e.status === "failed") {
+          status.textContent = `Couldn't start the session: ${e.message || "see the server log"}`;
+          showStart();
+        } else if (e.status === "running") {
           banner.hidden = true; ctl.setLang(e.language_hint);
           setRunning(true);
         } else {
@@ -255,6 +272,7 @@ export function liveView(outlet) {
         }
         if (/Pulse sensors streaming/.test(e.text)) sensorWarn.hidden = true;
         if (/starts snoring/.test(e.text)) status.textContent = "Snoring · learning their resting heartbeat (about a minute)";
+        if (/Reachy wakes up/.test(e.text)) status.textContent = "Heartbeat felt · waking up";
         if (/not answering/.test(e.text)) toast("A pulse sensor isn't answering: see the bar at the top.", "error");
         break;
       case "error": toast(e.message, "error"); break;
