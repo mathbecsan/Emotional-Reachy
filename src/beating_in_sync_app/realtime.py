@@ -207,7 +207,14 @@ class RealtimeConversation:
         self.performing_since = 0.0
         self.last_music_t = 0.0
         self.last_clap_t = 0.0
-        session.rt = self
+        self._pre_thread: threading.Thread | None = None
+        self._pre_ws = None
+        self._pre_err: Exception | None = None
+        self.reply_wait_t: float | None = None      # when the participant's words arrived (latency stamps)
+        self.first_word_pending = True
+        self.started_t = time.monotonic()
+        self.finger_off_t: float | None = None
+        self.finger_steps: set[str] = set()
 
     # ---------------------------------------------------------------- plumbing
     def send(self, msg: dict) -> None:
@@ -330,6 +337,8 @@ class RealtimeConversation:
             if not (self.closing_t or show.reset_mode) and self.switch_pending != BASE:
                 return ("Stay in the tour: you are " + show.current.name + ". Only switch when the Director says so."
                         if show.current.key != BASE else "You are already Base Reachy. Keep going."), False
+            # Closing or reset: Base Reachy from here on (trial run: the goodbye was shown as the last persona).
+            show.reset_mode = True
         elif key not in show.cast:
             nxt = show.upcoming
             return (f"{key} is not in your cast. Use {nxt.key} ({nxt.name}) instead." if nxt
@@ -555,6 +564,18 @@ class RealtimeConversation:
             kind = msg.get("type")
             if kind == "audio":
                 self.play_q.put(base64.b64decode(msg["audio_event"]["audio_base_64"]))
+                now = time.monotonic()
+                if self.first_word_pending:
+                    self.first_word_pending = False
+                    extra = {"since_connect": round(now - self.started_t, 2)}
+                    since = self.s.since_contact()
+                    if since is not None:
+                        extra["since_contact"] = round(since, 2)
+                    wake_t = getattr(self.s, "wake_t", None)
+                    self.s.latency("first_word", now - (wake_t or self.started_t), **extra)
+                if self.reply_wait_t is not None:
+                    self.s.latency("reply", now - self.reply_wait_t)
+                    self.reply_wait_t = None
             elif kind == "agent_response":
                 # v4 voices take inline delivery tags like "[excited]"; keep them out of logs and the UI
                 text = re.sub(r"\[[a-z ]{2,20}\]\s*", "", msg["agent_response_event"]["agent_response"]).strip()
@@ -566,6 +587,7 @@ class RealtimeConversation:
                 self.s.transcript.append({"reachy": text, "mode": self.mode_label})
                 self.s.log.event("say", self.s.clock.now(), text=text, mode=self.mode_label, lang="auto")
             elif kind == "user_transcript":
+                self.reply_wait_t = time.monotonic()
                 self._on_user(msg["user_transcription_event"]["user_transcript"])
             elif kind == "interruption":
                 while not self.play_q.empty():
@@ -618,18 +640,42 @@ class RealtimeConversation:
                 self.last_note = f"saw their face: {sig.face_emotion}"
                 self.context(f"[Reachy senses] You can see their face: they look {sig.face_emotion}. React to it "
                              "naturally (never comment on their appearance, only the expression).")
-            if not sig.finger_on and t - d.last_nudge_t > 40:
-                d.finger_off_since = d.finger_off_since or t
-                if t - d.finger_off_since > s.cfg.finger_lost_s:
-                    d.last_nudge_t = t
-                    self.context("[Reachy senses] Their finger left the pulse sensor; you can't hear their heart. "
-                                 "Ask them warmly to put it back.")
-            elif sig.finger_on:
-                d.finger_off_since = None
+            self._finger(sig)
             if sig.bpm_overlimit_s >= s.cfg.bpm_stop_duration_s:
                 s.stop_reason = "BPM above limit"
                 self.closed.set()
             s.clock.sleep(1.0)
+
+    def _finger(self, sig) -> None:
+        """The lifted-finger ladder (session flow v2, Act 1c): glance, ask, get sleepy. The session
+        never ends or restarts because of it; during a performance the participant is free to move."""
+        s, now = self.s, time.monotonic()
+        who = f" as {self.show.current.name}" if self.show else ""
+        if sig.finger_on:
+            if self.finger_off_t is not None and "ask" in self.finger_steps and not self.closing_t:
+                s.body.play("mini_jolt")
+                self.direct(f"[Reachy senses] Their finger is back on the sensor. One quick line{who}, like "
+                            "\"I'm up! Don't do that to me.\", then carry on where you were.")
+            self.finger_off_t, self.finger_steps = None, set()
+            return
+        if self.performing_since or self.closing_t:
+            return
+        self.finger_off_t = self.finger_off_t or now
+        gone = now - self.finger_off_t
+        if gone >= s.cfg.finger_glance_s and "glance" not in self.finger_steps and now > self.speaking_until:
+            self.finger_steps.add("glance")
+            s.body.play("check_sensor")
+        if gone >= s.cfg.finger_lost_s and "ask" not in self.finger_steps:
+            self.finger_steps.add("ask")
+            self.context(f"[Reachy senses] Their finger left the pulse sensor; you can't feel their heart. "
+                         f"On your next turn, ask{who} for it back in one playful line (\"Hey! I felt that. "
+                         "Finger back, please.\"). Never make it a big deal.")
+        if gone >= s.cfg.finger_doze_s and "doze" not in self.finger_steps:
+            self.finger_steps.add("doze")
+            others = s.hub.snapshot().num_people >= 2
+            self.context(f"[Reachy senses] Still no finger on the sensor. You are getting sleepy without a heartbeat: "
+                         f"say so{who}, drowsily" + (", and offer the sensor to someone else in the room." if others else ".")
+                         + " Keep the conversation going.")
 
     def stage_note(self, stage: int) -> str:
         s = self.s
@@ -652,13 +698,54 @@ class RealtimeConversation:
         return note
 
     # ---------------------------------------------------------------- run
-    def run(self, done) -> None:
+    def _open(self):
         from websockets.sync.client import connect
 
         r = httpx.get(f"{API}/convai/conversation/get-signed-url", params={"agent_id": self.agent_id},
                       headers=_headers(), timeout=15)
         r.raise_for_status()
-        with connect(r.json()["signed_url"], max_size=None, open_timeout=15) as ws:
+        return connect(r.json()["signed_url"], max_size=None, open_timeout=15)
+
+    def preconnect(self) -> None:
+        """Open the connection now (at the first touch), so it is ready when Reachy wakes:
+        the signed URL and the websocket handshake no longer sit between waking and talking."""
+        def go() -> None:
+            t0 = time.monotonic()
+            try:
+                self._pre_ws = self._open()
+                logger.info("Live conversation connected early (%.1f s)", time.monotonic() - t0)
+            except Exception as e:
+                self._pre_err = e
+                logger.warning("Early connection failed (%s); will connect at wake-up", e)
+        self._pre_thread = threading.Thread(target=go, daemon=True, name="rt-preconnect")
+        self._pre_thread.start()
+
+    def discard(self) -> None:
+        """Close an early connection that was never used (session stopped before Reachy woke)."""
+        if self._pre_thread is not None:
+            self._pre_thread.join(timeout=20)
+        if self._pre_ws is not None:
+            try:
+                self._pre_ws.close()
+            except Exception:
+                pass
+            self._pre_ws = None
+
+    def _connection(self):
+        if self._pre_thread is not None:
+            t0 = time.monotonic()
+            self._pre_thread.join(timeout=20)
+            waited = time.monotonic() - t0
+            ws, self._pre_ws = self._pre_ws, None
+            if ws is not None:
+                if waited > 0.2:
+                    logger.info("Waited %.1f s for the early connection", waited)
+                return ws
+        return self._open()
+
+    def run(self, done) -> None:
+        self.s.rt = self
+        with self._connection() as ws:
             self.ws = ws
             u = self.s.user
             facts = [f"Participant id {self.s.log.path.split('/')[-1]}"]
@@ -668,6 +755,7 @@ class RealtimeConversation:
             if self.show is not None:
                 init["dynamic_variables"] = {"cast": self.show.agent_cast_prompt(), "opener": self.s.persona_opener()}
                 facts.append(f"Your cast: {', '.join(self.show.cast)}. Switch about every {self.show.switch_every} exchanges.")
+            self.started_t = time.monotonic()
             self.send(init)
             threads = [threading.Thread(target=f, daemon=True, name=n) for f, n in
                        ((self._receiver, "rt-recv"), (self._speaker, "rt-speaker"), (self._mic, "rt-mic"),

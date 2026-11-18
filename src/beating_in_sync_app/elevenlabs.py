@@ -4,6 +4,7 @@ speech-to-text with language detection (its ears).
 The API key is read from the environment (ELEVENLABS_API_KEY, set in .env);
 it is never stored in code or logs.
 """
+import hashlib
 import io
 import logging
 import os
@@ -11,13 +12,17 @@ import queue
 import threading
 import time
 import wave
+from pathlib import Path
 from typing import Optional
+
+import json
 
 import httpx
 
 from .body.voice import MacVoice
 from .perception.speech import Utterance
 
+CLIP_DIR = Path(__file__).resolve().parents[2] / ".voice_cache"   # git-ignored: pre-recorded predictable lines
 PLAY_MARGIN_S = 12.0     # speech may run this long past its expected length before it's cut off
 
 
@@ -76,8 +81,7 @@ class ElevenLabsVoice(MacVoice):
                                   params={"output_format": "pcm_16000", "optimize_streaming_latency": "3"},
                                   headers={"xi-api-key": api_key() or ""}, json=body)
 
-    def say(self, text, lang="en", rate=1.0, mode=""):
-        logger.info("REACHY (%s, %s)> %s", mode, lang, text)
+    def _body(self, text, lang, rate, mode) -> dict:
         from .brain.personas import PERSONAS
 
         stability, style = PERSONAS[mode].voice[:2] if mode in PERSONAS else MODE_VOICE.get(mode, (0.5, 0.3))
@@ -86,6 +90,57 @@ class ElevenLabsVoice(MacVoice):
                                    "speed": max(0.7, min(1.2, rate))}}
         if lang and len(lang) == 2:
             body["language_code"] = lang
+        return body
+
+    # ---------------------------------------------------------------- clip cache (session flow v2, section 4)
+    def _clip_path(self, body) -> Path:
+        key = json.dumps([self.voice_id, body], sort_keys=True).encode()
+        return CLIP_DIR / f"{hashlib.sha1(key).hexdigest()[:16]}.pcm"
+
+    def _record(self, body, path: Path) -> bool:
+        try:
+            with self._stream(body) as r:
+                if r.status_code >= 400:
+                    r.read()
+                    r.raise_for_status()
+                data = b"".join(r.iter_bytes())
+        except httpx.HTTPError as e:
+            logger.warning("Could not pre-record %r: %s", body.get("text"), e)
+            return False
+        CLIP_DIR.mkdir(exist_ok=True)
+        tmp = path.with_suffix(".part")
+        tmp.write_bytes(data[: len(data) - len(data) % 2])
+        tmp.replace(path)
+        return True
+
+    def prewarm(self, lines, mode="", rate=1.0, lang="en") -> None:
+        """Record predictable lines once, in the background, so they later play with no network wait."""
+        todo = [b for b in (self._body(t, lang, rate, mode) for t in lines) if not self._clip_path(b).exists()]
+        if not todo or not api_key():
+            return
+
+        def go() -> None:
+            done = sum(self._record(b, self._clip_path(b)) for b in todo)
+            logger.info("Pre-recorded %d of %d lines", done, len(todo))
+        threading.Thread(target=go, daemon=True, name="prewarm").start()
+
+    def say_clip(self, text, lang="en", rate=1.0, mode=""):
+        """Play a pre-recorded line from disk (recording it first if it isn't cached yet)."""
+        body = self._body(text, lang, rate, mode)
+        path = self._clip_path(body)
+        if not path.exists() and not (api_key() and self._record(body, path)):
+            return self.say(text, lang, rate, mode)
+        logger.info("REACHY (%s, %s, clip)> %s", mode, lang, text)
+        pcm = self.np.frombuffer(path.read_bytes(), dtype="<i2").astype("float32") / 32768.0
+        try:
+            with self.sd.OutputStream(samplerate=self.RATE, channels=2, dtype="float32", device=self.device) as out:
+                out.write(self.np.repeat(pcm[:, None], 2, axis=1))
+        except self.sd.PortAudioError as e:
+            logger.warning("Clip playback failed: %s", e)
+
+    def say(self, text, lang="en", rate=1.0, mode=""):
+        logger.info("REACHY (%s, %s)> %s", mode, lang, text)
+        body = self._body(text, lang, rate, mode)
         for attempt in (0, 1):
             try:
                 if self._play_stream(body):

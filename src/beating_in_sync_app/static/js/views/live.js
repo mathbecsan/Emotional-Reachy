@@ -5,7 +5,7 @@
  */
 import { h, toast } from "../ui.js";
 import { api, command, say, onEvent } from "../api.js";
-import { MODES, LANGS, BPM_STOP } from "../constants.js";
+import { MODES, LANGS, BPM_STOP, LATENCY_BUDGET } from "../constants.js";
 import { heartChart } from "../components/heart-chart.js";
 import { stageTimeline } from "../components/stage-timeline.js";
 import { transcript } from "../components/transcript.js";
@@ -42,10 +42,40 @@ function idlePanel() {
 }
 
 const STATUS = {
-  0: "Asleep · ask the participant to rest a finger on a pulse sensor",
-  1: "Waking up…", 2: "Getting to know the participant", 3: "In conversation", 4: "In conversation",
+  0: "Asleep · waiting for a fingertip on a pulse sensor",
+  1: "Waking up…", 2: "Introductions · Base Reachy", 3: "In conversation", 4: "In conversation",
   5: "Music and dance", 6: "Saying goodbye", 7: "Finished",
 };
+
+/** Latency card (session flow v2, section 4): how fast Reachy answers, against the budget. */
+function latencyCard() {
+  const rows = { contact_to_wake: "Fingertip → wake", first_word: "Wake → first word", reply: "Last reply", avg: "Average reply" };
+  const cells = {};
+  const dl = h("dl", { class: "latency" }, Object.entries(rows).flatMap(([k, label]) => {
+    cells[k] = h("dd", {}, "—");
+    return [h("dt", {}, label), cells[k]];
+  }));
+  const el = h("section", { class: "card debug-only" }, h("h2", { class: "card__title" }, "Latency"), dl);
+  let replies = [];
+  const show = (key, budgetKey, secs) => {
+    const [good, ok] = LATENCY_BUDGET[budgetKey];
+    cells[key].textContent = `${secs.toFixed(1)} s`;
+    cells[key].className = secs <= good ? "is-good" : secs <= ok ? "is-ok" : "is-slow";
+  };
+  return {
+    el,
+    add(e) {
+      if (!(e.measure in LATENCY_BUDGET)) return;
+      if (e.measure === "reply") {
+        replies.push(e.seconds);
+        show("reply", "reply", e.seconds);
+        show("avg", "reply", replies.reduce((a, b) => a + b, 0) / replies.length);
+        cells.avg.textContent += ` (${replies.length})`;
+      } else show(e.measure, e.measure, e.seconds);
+    },
+    reset() { replies = []; Object.values(cells).forEach((c) => { c.textContent = "—"; c.className = ""; }); },
+  };
+}
 
 function controls(getLang) {
   const btn = (label, cmd, cls = "", title = "") => h("button", {
@@ -97,17 +127,17 @@ export function liveView(outlet) {
   const log = transcript();
   const sensors = sensorPanel();
   const strip = personaStrip();
+  const latency = latencyCard();
   const who = h("dl", { class: "who" });
   const ctl = controls();
   const banner = h("div", { class: "banner", hidden: true });
   const status = h("p", { class: "live__status" }, "Waiting for a session");
   const sensorWarn = h("div", { class: "banner banner--warn", hidden: true, role: "alert" });
   const actions = h("div", { class: "btn-row live__actions" },
-    h("button", { class: "btn", type: "button", title: "Skip ahead (next personality, or next stage)",
+    h("button", { class: "btn", type: "button", title: "Skip ahead: wakes Reachy while it's asleep, then moves on to the next personality",
       onclick: () => command("/next").catch((e) => toast(e.message, "error")) }, "Skip ahead"),
     h("button", { class: "btn btn--danger", type: "button", title: "Reachy says goodbye kindly and goes to sleep",
       onclick: () => { if (confirm("End the session now? Reachy will say goodbye and go to sleep.")) command("/pause").catch((e) => toast(e.message, "error")); } }, "End session"));
-  timeline.el.classList.add("debug-only");
   sensors.el.classList.add("debug-only");
   chart.el.classList.add("debug-only");
   modeWhy.classList.add("debug-only");
@@ -127,7 +157,7 @@ export function liveView(outlet) {
         h("section", { class: "card heart" },
           h("div", { class: "heart__head" }, h("h2", { class: "card__title" }, "Heart"), h("div", {}, bpmNow, h("span", { class: "heart__unit" }, " BPM")), bpmMeta),
           chart.el, safety),
-        sensors.el),
+        sensors.el, latency.el),
       h("div", { class: "live__right" }, log.el,
         h("section", { class: "card debug-only" }, h("h2", { class: "card__title" }, "What Reachy knows"), who),
         ctl.el)));
@@ -164,7 +194,7 @@ export function liveView(outlet) {
 
   function clearAll() {
     // Everything on this screen belongs to one session: wipe it so a new session starts from zero.
-    chart.reset(); log.reset(); timeline.reset(); sensors.reset(); strip.reset();
+    chart.reset(); log.reset(); timeline.reset(); sensors.reset(); strip.reset(); latency.reset();
     baseline = null; overSince = null;
     sensorWarn.hidden = true; banner.hidden = true; safety.hidden = true;
     bpmNow.textContent = "––"; bpmNow.classList.remove("heart__bpm--high"); bpmMeta.textContent = "no baseline yet";
@@ -259,6 +289,7 @@ export function liveView(outlet) {
       case "command": log.note(`facilitator: ${e.cmd}`, "line--cmd"); break;
       case "stop": log.note(`STOP — ${e.reason}`, "line--stop"); toast(`Stopped: ${e.reason}`, "error"); break;
       case "sound": log.note(`♫ ${e.text}`, "line--stage"); break;
+      case "latency": latency.add(e); break;
       case "sensor":
         log.note(e.text, "line--prompt");
         if (/Pulse sensors (unavailable|not answering)/.test(e.text)) {
@@ -272,7 +303,8 @@ export function liveView(outlet) {
         }
         if (/Pulse sensors streaming/.test(e.text)) sensorWarn.hidden = true;
         if (/starts snoring/.test(e.text)) status.textContent = "Snoring · learning their resting heartbeat (about a minute)";
-        if (/Reachy wakes up/.test(e.text)) status.textContent = "Heartbeat felt · waking up";
+        if (/Fingertip felt/.test(e.text)) status.textContent = "Stirring · reading the heartbeat";
+        if (/Reachy wakes up|wake now/.test(e.text)) status.textContent = "Waking up…";
         if (/not answering/.test(e.text)) toast("A pulse sensor isn't answering: see the bar at the top.", "error");
         break;
       case "error": toast(e.message, "error"); break;

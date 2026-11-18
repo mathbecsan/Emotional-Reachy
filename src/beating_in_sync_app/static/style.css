@@ -89,6 +89,13 @@ button, input, select { font: inherit; color: inherit; }
 .timeline__stage.is-skipped { opacity: 0.4; text-decoration: line-through; }
 .timeline__clock { font-variant-numeric: tabular-nums; color: var(--muted); min-width: 92px; text-align: right; }
 .timeline__clock--over { color: var(--warn); }
+.timeline__list--acts { grid-template-columns: repeat(5, 1fr); }
+.latency { display: grid; grid-template-columns: 1fr auto; gap: 4px 12px; margin: 0; font-size: 13px; }
+.latency dt { color: var(--muted); }
+.latency dd { margin: 0; font-variant-numeric: tabular-nums; text-align: right; }
+.latency .is-good { color: var(--ok, #4caf50); }
+.latency .is-ok { color: var(--warn); }
+.latency .is-slow { color: var(--danger, #e05555); }
 
 .mode { display: grid; grid-template-columns: 150px 1fr; gap: 16px; align-items: center; border-color: color-mix(in srgb, var(--mode) 45%, var(--line)); }
 .mode__name { font-size: 26px; font-weight: 700; color: var(--mode); }
@@ -172,6 +179,7 @@ body.is-projection .shell__outlet { padding: 0; max-width: none; }
 @media (max-width: 960px) {
   .live__cols { grid-template-columns: 1fr; }
   .timeline__list { grid-template-columns: repeat(4, 1fr); }
+  .timeline__list--acts { grid-template-columns: repeat(3, 1fr); }
   .mode { grid-template-columns: 100px 1fr; }
   .reachy-face { width: 100px; }
   .shell__outlet { padding: 12px 16px 32px; }

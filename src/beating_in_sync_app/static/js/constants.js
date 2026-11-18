@@ -10,6 +10,18 @@ export const MODES = {
   sincere:  { color: "#7be0a8", label: "Sincere" },
 };
 
+// Session flow v2: the five acts, and which act each protocol stage belongs to.
+export const ACTS = [
+  { n: 1, name: "Asleep" },
+  { n: 2, name: "Wake-up & Analysis" },
+  { n: 3, name: "Introductions" },
+  { n: 4, name: "Conversation & Personality" },
+  { n: 5, name: "Goodbye" },
+];
+export const ACT_OF_STAGE = { 0: 1, 1: 2, 2: 3, 3: 4, 4: 4, 5: 4, 6: 5, 7: 5 };
+// Latency budget (seconds): [target, acceptable] -- session flow v2, section 4.
+export const LATENCY_BUDGET = { reply: [1.5, 2.5], first_word: [1.5, 2.5], contact_to_wake: [6, 10] };
+
 export const STAGES = [
   { n: 0, name: "Baseline", secs: 120 },
   { n: 1, name: "Wake-up", secs: 60 },

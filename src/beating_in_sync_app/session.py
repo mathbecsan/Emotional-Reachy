@@ -39,6 +39,14 @@ class StopSession(Exception):
     pass
 
 
+# Session flow v2: five acts on top of the protocol's stage numbers (stage -> act).
+ACT_OF_STAGE = {0: 1, 1: 2, 2: 3, 3: 4, 4: 4, 5: 4, 6: 5, 7: 5}
+ACT_NAMES = {1: "Asleep", 2: "Wake-up & Analysis", 3: "Introductions", 4: "Conversation & Personality", 5: "Goodbye"}
+
+# Act 1 sounds: short, predictable, so they play from the local clip cache with no network wait.
+STIR_LINES = ["Mm?", "Hmm... someone's there...", "Mmh... a heartbeat..."]
+COAX_LINES = ["Come back... I was almost awake...", "Mmm... where did you go...", "Your heart... it was warm..."]
+
 GESTURE_FOR = {Mode.SLEEPY: "sleepy", Mode.CURIOUS: "curious", Mode.EXCITED: "excited", Mode.FLIRTY: "flirty",
                Mode.TEASING: "teasing", Mode.OFFENDED: "offended", Mode.SCOLDING: "scolding", Mode.SINCERE: "sincere"}
 
@@ -65,6 +73,9 @@ class Session:
         self.force_next = False
         self.stop_reason: Optional[str] = None
         self.realtime_agent = realtime_agent   # ElevenLabs agent id: stages 1-4 run as a live conversation
+        self.live = None                  # live conversation opened at the first touch, before Reachy wakes
+        self.contact_t: Optional[float] = None   # monotonic time the fingertip first landed (latency stamps)
+        self.wake_now = False             # Act 1 is over: wake even without a readable heartbeat
 
     # ================================================================ commands
     def on_command(self, line: str):
@@ -76,7 +87,7 @@ class Session:
         self.log.event("command", self.clock.now(), cmd=line)
         if c in ("sleep", "pause", "stop"):
             self.stop_reason = f"facilitator: {c}"
-        elif c == "next" and self.show is not None and self.stage >= 3:
+        elif c == "next" and self.show is not None and self.stage >= 2:
             self.persona_cmd("next")
         elif c == "next":
             self.force_next = True
@@ -138,8 +149,18 @@ class Session:
         self.stage, self.stage_t0, self.turns_in_stage, self.force_next = stage, self.clock.now(), 0, False
         # The resting heartbeat is learned in stage 0, or right after waking when Reachy wakes at the first beat.
         self.heart.collect_baseline = stage == 0 or (self.cfg.wake_on_first_heartbeat and self.heart.baseline is None)
-        logger.info("=== STAGE %s ===", stage)
-        self.log.event("stage", self.clock.now(), stage=stage, seconds=self.cfg.stage_time[stage] / self.clock.scale)
+        logger.info("=== STAGE %s (act %s) ===", stage, ACT_OF_STAGE[stage])
+        self.log.event("stage", self.clock.now(), stage=stage, seconds=self.cfg.stage_time[stage] / self.clock.scale,
+                       act=ACT_OF_STAGE[stage], act_name=ACT_NAMES[ACT_OF_STAGE[stage]])
+
+    def latency(self, kind: str, seconds: float, **extra) -> None:
+        """One latency measurement for the console's latency card and the replay (session flow v2, section 4)."""
+        logger.info("latency %s = %.2f s", kind, seconds)
+        self.log.event("latency", self.clock.now(), measure=kind, seconds=round(seconds, 2), **extra)
+
+    def since_contact(self) -> Optional[float]:
+        import time
+        return time.monotonic() - self.contact_t if self.contact_t is not None else None
 
     def speak(self, text, mode: Mode, lang=None, gesture=None):
         self.body.play(gesture or GESTURE_FOR[mode], loop=mode == Mode.SLEEPY)
@@ -274,6 +295,9 @@ class Session:
     # ================================================================ stages
     def run(self, listener, analyzer):
         self.listener, self.analyzer = listener, analyzer
+        prewarm = getattr(self.voice, "prewarm", None)
+        if prewarm:
+            prewarm(self.SNORES + STIR_LINES + COAX_LINES, "sleepy", 0.7)
         try:
             if self.heart_wake:
                 self.stage0_baseline()
@@ -291,6 +315,9 @@ class Session:
             # Never leave a participant mid-provocation: log it, then still say goodbye.
             logger.exception("Session error in stage %s", self.stage)
             self.log.event("stop", self.clock.now(), reason=f"internal error: {e}", stage=self.stage)
+        if self.live is not None:        # opened at the first touch but never used (stopped before waking)
+            self.live.discard()
+            self.live = None
         self.stop_reason = None          # stage 6 always runs, even after a stop
         self.heart.settle_baseline()     # short session: use what was recorded as the resting heartbeat
         self.note_baseline()
@@ -369,6 +396,8 @@ class Session:
 
     def persona_event(self, reason: str, source: str = "persona") -> None:
         p, show = self.show.current, self.show
+        if self.stage == 2 and p.key != "base":
+            self.enter(3)        # the first glitch ends the introductions: Act 4 begins
         self.log.event("persona", self.clock.now(), persona=p.key, name=p.name, color=p.color, reason=reason,
                        index=show.i, cast=show.cast, reset=show.reset_mode)
         self.log.event("turn", self.clock.now(), stage=self.stage, mode=p.key, act="switch", why=f"{p.name} ({reason})",
@@ -416,12 +445,13 @@ class Session:
             while not self.woken() and not self.stage_over():
                 self.check_safety()
                 self.listener_peek()
-        self.body.wake_up()
-        self.body.wait()
-        self.enter(3)
+        import time
+        self.wake_t = time.monotonic()
+        self.body.wake_up()          # no wait: Reachy starts talking while it lifts its head
+        self.enter(2)                # Base Reachy's opener; the first glitch moves on to Act 4
         if self.realtime_agent:
             try:
-                rt = RealtimeConversation(self, self.realtime_agent)
+                rt, self.live = self.live or RealtimeConversation(self, self.realtime_agent), None
                 rt.run(lambda: bool(self.stop_reason) or rt.persona_done())
                 self.check_safety()
                 if rt.closing_t:
@@ -521,8 +551,82 @@ class Session:
 
     def woken(self) -> bool:
         """The participant's heartbeat should wake Reachy now."""
+        if self.wake_now:
+            return True
         sig = self.hub.snapshot()
         return sig.pulse_present or (self.cfg.wake_on_first_heartbeat and sig.bpm is not None and sig.finger_on)
+
+    def on_contact(self) -> None:
+        """Act 1: a fingertip landed. Reachy stirs at once, and the live conversation starts
+        connecting now, so it is ready by the time Reachy is awake (session flow v2, section 4)."""
+        import time
+        self.contact_t = time.monotonic()
+        self.log.event("sensor", self.clock.now(), text="Fingertip felt: Reachy stirs.")
+        self.body.play("stir")
+        self.say_clip(self.rng.choice(STIR_LINES))
+        if self.realtime_agent and self.show is not None and self.live is None:
+            from .realtime import RealtimeConversation
+            try:
+                self.live = RealtimeConversation(self, self.realtime_agent)
+                self.live.preconnect()
+            except Exception as e:  # no audio device etc.: connect later, as before
+                logger.warning("Could not open the live conversation early: %s", e)
+                self.live = None
+
+    def say_clip(self, text: str) -> None:
+        """A short sleepy sound from the local clip cache, without holding up the Act 1 loop."""
+        import threading
+        if getattr(self, "_clip_thread", None) is not None and self._clip_thread.is_alive():
+            return
+        play = getattr(self.voice, "say_clip", self.voice.say)
+        self.log.event("say", self.clock.now(), text=text, mode="sleepy", lang="en")
+        self._clip_thread = threading.Thread(target=play, args=(text, "en", 0.7, "sleepy"), daemon=True, name="clip")
+        self._clip_thread.start()
+
+    def act1_asleep(self) -> None:
+        """Act 1 (session flow v2): asleep until a fingertip lands, then stirring while the first
+        heartbeat is read. Once touched, the session is latched: a lifted finger is coaxed back,
+        never a reason to start over."""
+        self.body.play("snore", loop=True)
+        contact_total, off_since, last_coax, last_t = 0.0, None, -1e9, self.clock.now()
+        glanced = False
+        while not self.force_next:
+            self.check_safety()
+            now = self.clock.now()
+            dt, last_t = now - last_t, now
+            sig = self.hub.snapshot()
+            if sig.finger_on:
+                if self.contact_t is None:
+                    self.on_contact()
+                elif off_since is not None and now - off_since >= self.cfg.finger_glance_s:
+                    self.body.play("stir")                 # back: stir again where it left off
+                off_since, glanced = None, False
+                contact_total += dt
+                if sig.bpm is not None:
+                    self.log.event("sensor", self.clock.now(), text="Heartbeat felt: Reachy wakes up.")
+                    break
+                if contact_total >= self.cfg.contact_wake_s:
+                    self.log.event("sensor", self.clock.now(),
+                                   text=f"No clear heartbeat after {self.cfg.contact_wake_s:.0f} s of contact: Reachy wakes up anyway.")
+                    break
+            elif self.contact_t is not None:
+                off_since = off_since if off_since is not None else now
+                gone = now - off_since
+                if gone >= self.cfg.finger_glance_s and not glanced:
+                    glanced = True
+                    self.body.play("check_sensor")
+                if gone >= self.cfg.finger_lost_s and now - last_coax > 8:
+                    last_coax = now
+                    self.say_clip(self.rng.choice(COAX_LINES))
+            if hasattr(self.listener, "steps"):
+                self.listener_peek()
+            else:
+                self.clock.sleep(0.1)
+        if self.force_next:
+            self.log.event("sensor", self.clock.now(), text="Facilitator: wake now.")
+        if self.contact_t is not None:
+            self.latency("contact_to_wake", self.since_contact())
+        self.wake_now = True
 
     def stage0_baseline(self):
         """Asleep and silent until a pulse arrives; then Reachy snores while the
@@ -531,6 +635,9 @@ class Session:
         self.log.event("prompt", self.clock.now(), text=self.cfg.prompts["baseline"])
         self.body.go_to_sleep()
         self.body.wait()
+        if self.cfg.wake_on_first_heartbeat:
+            self.act1_asleep()
+            return
         snoring, last_snore = False, -1e9
         # No timeout before the first pulse: Reachy sleeps until someone touches a sensor
         # (the facilitator can still press Next stage). The stage clock starts at the pulse.
@@ -544,12 +651,6 @@ class Session:
                 self.log.event("stage_clock", self.clock.now(), stage=0,
                                seconds=self.cfg.stage_time[0] / self.clock.scale)
                 self.body.play("snore", loop=True)
-                if self.cfg.wake_on_first_heartbeat:
-                    # One sleepy snore, then straight to waking up: the baseline is learned in the background.
-                    self.voice.say(self.rng.choice(self.SNORES), "en", 0.7, "sleepy")
-                    self.log.event("say", self.clock.now(), text="(snoring)", mode="sleepy", lang="en")
-                    self.log.event("sensor", self.clock.now(), text="Heartbeat felt: Reachy wakes up.")
-                    return
             if snoring and self.clock.now() - last_snore > 12:
                 self.voice.say(self.rng.choice(self.SNORES), "en", 0.7, "sleepy")
                 self.log.event("say", self.clock.now(), text="(snoring)", mode="sleepy", lang="en")

@@ -7,17 +7,25 @@ session with a participant, and checking the results. No coding needed.
 
 ## What happens in a session
 
-1. Reachy is asleep. The participant rests a finger on a **pulse sensor**.
-2. The moment Reachy feels the heartbeat (a few seconds, once the sensor locks on),
-   it gives one sleepy snore and **wakes up**. It learns the participant's resting
-   heart rate during the first minute of the conversation. (To snore through that
+A session follows five acts (the full design is *Session Flow v2: Official Structure*):
+
+1. **Asleep.** The participant rests a fingertip on a **pulse sensor**. Reachy stirs at
+   once (antennas twitch, a sleepy murmur) and keeps dozing while it reads the heartbeat.
+   If the finger slips off, Reachy glances at the sensor and coaxes it back; the session
+   never restarts because of it.
+2. **Wake-up.** As soon as the heartbeat is read (a few seconds), or after 10 seconds of
+   contact if it is hard to read, Reachy **wakes up** and starts talking while it lifts its
+   head. It learns the resting heart rate during the first minute. (To snore through that
    minute before waking, as in the original protocol, set `wake_on_first_heartbeat = False`
    in `config.py`.)
-3. Reachy talks with the participant. In the *Off-Brand Reachy* experience it
+3. **Introductions** as Base Reachy.
+4. **Conversation & personality.** In the *Off-Brand Reachy* experience Reachy
    slips between **personalities** (a bored teenager, a noir detective, a
    hype-bro…), reacting to what the participant says, their face and their heart.
-4. Reachy closes as its friendly self, says goodbye, and goes back to sleep.
-5. Everything is saved, so you can replay the session afterwards.
+   A lifted finger mid-conversation gets a playful "finger back, please", never a stop.
+5. **Goodbye.** Reachy closes as its friendly self, says goodbye, and goes back to sleep.
+
+Everything is saved, so you can replay the session afterwards.
 
 ---
 
@@ -118,7 +126,9 @@ Once a step has been reached it stays open, so you can go back and re-test witho
 - **Performances:** if the participant claps, sings or plays music, Reachy notices it (not only words).
   During music it sways along without talking over it, then reacts to the performance in the current personality.
 
-- The status says what Reachy is doing (*Asleep · ask the participant to rest a finger…*, *Snoring*, *In conversation*).
+- The **act rail** at the top shows which of the five acts is running and the session's total time.
+- The status says what Reachy is doing (*Asleep · waiting for a fingertip*, *Stirring · reading the heartbeat*, *Introductions*, *In conversation*).
+- **Latency** (debug mode) shows how fast Reachy answers: fingertip → wake, wake → first word, and each reply, green within the target, yellow acceptable, red slow.
 - The current personality appears as Reachy in costume.
 - **Personality now** shows the line-up. Click a name to jump to it, or use **Next personality**, **Reset to Base** or **Close interview**.
 - **End session** stops kindly at any time.

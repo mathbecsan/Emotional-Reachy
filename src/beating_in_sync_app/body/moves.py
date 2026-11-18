@@ -62,15 +62,27 @@ class BaseBody:
         self.current: str | None = None
 
     def play(self, name_or_seq, loop: bool = False) -> None:
-        self._stop.set()
-        if self._thread and self._thread.is_alive():
-            self._thread.join(timeout=2)
-        self._stop = threading.Event()
-        stop = self._stop
+        """Start a gesture and return at once. The new gesture waits for the old one's current
+        keyframe on its own thread, so callers (the voice receiver, the session loop) never block."""
         self.current = name_or_seq if isinstance(name_or_seq, str) else "sequence"
         logger.debug("gesture %s", self.current)
-        runner = self._runner(name_or_seq, loop, stop)
-        self._thread = threading.Thread(target=runner, daemon=True)
+        self._spawn(self._runner(name_or_seq, loop, self._next_stop()))
+
+    def _next_stop(self) -> threading.Event:
+        self._stop.set()
+        self._stop = threading.Event()
+        return self._stop
+
+    def _spawn(self, run) -> None:
+        prev, stop = self._thread, self._stop
+
+        def chained() -> None:
+            if prev is not None and prev.is_alive():
+                prev.join(timeout=3)          # the SDK refuses overlapping moves
+            if not stop.is_set():
+                run()
+
+        self._thread = threading.Thread(target=chained, daemon=True, name="gesture")
         self._thread.start()
 
     def _runner(self, name_or_seq, loop, stop):
@@ -198,19 +210,30 @@ class ReachyMiniBody(BaseBody):
         self._body = body
 
     def wake_up(self) -> None:
-        self._stop.set()
-        if self._thread and self._thread.is_alive():
-            self._thread.join(timeout=3)   # let the snore keyframe finish: the SDK refuses overlapping moves
-        try:
-            self.robot.wake_up()  # also plays wake_up.wav, which fails when the daemon runs --no-media
-        except Exception as e:
-            logger.warning("SDK wake_up incomplete (%s); continuing with keyframes", e)
-        self.play("wake")
+        """Runs on the gesture thread, so Reachy can start talking while it lifts its head."""
+        self.current = "wake"
+        stop = self._next_stop()
+        keyframes = super()._runner("wake", False, stop)
+
+        def run() -> None:
+            try:
+                self.robot.wake_up()  # also plays wake_up.wav, which fails when the daemon runs --no-media
+            except Exception as e:
+                logger.warning("SDK wake_up incomplete (%s); continuing with keyframes", e)
+            keyframes()
+
+        self._spawn(run)
 
     def go_to_sleep(self) -> None:
-        self._stop.set()
-        try:
-            self.robot.goto_sleep()
-        except Exception as e:
-            logger.warning("SDK goto_sleep failed (%s); using keyframes", e)
-            self.play("to_sleep")
+        self.current = "to_sleep"
+        stop = self._next_stop()
+        keyframes = super()._runner("to_sleep", False, stop)
+
+        def run() -> None:
+            try:
+                self.robot.goto_sleep()
+            except Exception as e:
+                logger.warning("SDK goto_sleep failed (%s); using keyframes", e)
+                keyframes()
+
+        self._spawn(run)

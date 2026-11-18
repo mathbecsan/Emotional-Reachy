@@ -24,7 +24,12 @@ class Config:
 
     pulse_mode: str = "one"              # one | wake | two (see perception/pulse_sensor.py)
     finger_min: int = 20000              # IR level that counts as a finger (pulse_triple --finger-min)
-    finger_lost_s: float = 6.0           # finger off the sensors this long -> Reachy asks for it back
+    finger_lost_s: float = 5.0           # finger off the sensors this long -> Reachy asks for it back
+    # Session flow v2, Act 1: a fingertip makes Reachy stir at once; it wakes at the first heartbeat,
+    # or after this much contact in total (lifts included) if the heartbeat is hard to read.
+    contact_wake_s: float = 10.0
+    finger_glance_s: float = 1.5         # finger off this long -> Reachy glances at the sensor (no words)
+    finger_doze_s: float = 20.0          # finger off this long -> Reachy gets sleepy, but the session goes on
 
     # What the facilitator UI tells the participant (Arduino setup: two finger sensors).
     prompts: dict = field(default_factory=lambda: {

@@ -46,6 +46,7 @@ MIN_RANGE = 30          # detrended peak-to-peak below this = no usable pulse
 BEAT_THRESHOLD = 0.65
 BEAT_REFRACTORY_S = 0.35
 SETTLE_S = 0.6          # ignore this long after a finger lands
+CONTACT_S = 0.2         # a finger must rest this long to count as contact (session flow v2: wake trigger)
 
 BAUD = 115200
 IR_LINE = re.compile(r"^\d+,\d+$")
@@ -93,6 +94,10 @@ class SampleBuffer:
 
     def finger_on(self, now) -> bool:
         return now - self.last_finger_t < 0.5
+
+    def contact(self, now) -> bool:
+        """A fingertip resting on the sensor: on for CONTACT_S, so a brush of the hand doesn't count."""
+        return self.finger_on(now) and now - self.fresh_t >= CONTACT_S
 
     def snapshot(self):
         cutoff = time.monotonic() - WINDOW_S
@@ -386,8 +391,12 @@ class ArduinoPulseSource(threading.Thread):
             for buf, an in zip(self.bufs, self.analyzers):
                 ts, vs = buf.snapshot()
                 results.append(an.update(ts, vs, now))
-            fingers = [b.finger_on(now) for b in self.bufs]
+            fingers = [b.contact(now) for b in self.bufs]
             locked = [an.bpm if an.has_signal and an.bpm else 0.0 for an in self.analyzers]
+            if fingers != was:
+                # Contact is published at once (not with the 1 s heart update): it is what
+                # makes Reachy stir, so it has to be felt within a fraction of a second.
+                self.hub.update(finger_on=any(fingers))
             for i in range(2):
                 if fingers[i] != was[i]:
                     self.log.event("sensor", self.clock.now(),

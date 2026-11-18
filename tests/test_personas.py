@@ -185,3 +185,12 @@ def test_activities_tone_and_length_shape_the_session(tmp_path):
     from beating_in_sync_app.brain.activities import style_prompt
     show.style = style_prompt("warm", "brief", ["sing"])
     assert "warm and gentle" in show.agent_cast_prompt() and "Sing a song" in show.agent_cast_prompt()
+
+
+def test_facilitator_close_lands_on_base_reachy():
+    # Trial run: after "Close interview" the goodbye was shown as the last persona in the cast.
+    s, rc = persona_rc()
+    rc.persona_command("close")
+    assert rc.closing_t
+    rc._on_tool({"tool_name": "reachy_switch_persona", "tool_call_id": "c", "parameters": {"persona": "base"}})
+    assert s.show.current.key == BASE and not rc.sent[-1]["is_error"]

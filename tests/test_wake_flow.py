@@ -23,14 +23,19 @@ def run_session(tmp_path, scenario_steps=None, cfg=None, time_scale=40, **kw):
     return [json.loads(x) for x in next(tmp_path.glob("*.jsonl")).read_text().splitlines()]
 
 
+def is_pulse(e):
+    """The moment the sensor first felt someone: a fingertip (flow v2) or a pulse (baseline flow)."""
+    return e["kind"] == "sensor" and ("snoring" in e["text"] or "Fingertip felt" in e["text"])
+
+
 def kinds(events):
     out = []
     for e in events:
         if e["kind"] == "stage":
             out.append(f"stage{e['stage']}")
-        elif e["kind"] == "sensor" and "snoring" in e["text"]:
+        elif is_pulse(e):
             out.append("pulse")
-        elif e["kind"] == "say" and e["text"] == "(snoring)":
+        elif e["kind"] == "say" and (e["text"] == "(snoring)" or e.get("mode") == "sleepy"):
             out.append("snore")
         elif e["kind"] == "baseline":
             out.append("baseline")
@@ -43,7 +48,7 @@ def test_wakes_at_the_first_heartbeat(tmp_path):
     events = run_session(tmp_path)
     seq = kinds(events)
     assert seq.index("stage0") < seq.index("pulse") < seq.index("snore") < seq.index("stage1") < seq.index("wake")
-    pulse_t = next(e["t"] for e in events if e["kind"] == "sensor" and "snoring" in e["text"])
+    pulse_t = next(e["t"] for e in events if is_pulse(e))
     stage1_t = next(e["t"] for e in events if e["kind"] == "stage" and e["stage"] == 1)
     assert stage1_t - pulse_t < 15                         # no 60 s baseline before waking
     assert seq[-1] == "stage7"
@@ -60,7 +65,7 @@ def test_no_snoring_before_a_finger(tmp_path):
     steps = [{"wait": 30}, {"cmd": "/finger on"}, {"say": "hi", "lang": "en"}]
     events = run_session(tmp_path, steps)
     seq = kinds(events)
-    pulse_t = next(e["t"] for e in events if e["kind"] == "sensor" and "snoring" in e["text"])
+    pulse_t = next(e["t"] for e in events if is_pulse(e))
     assert pulse_t >= 30                                   # silent sleep until the finger lands
     assert not any(e["kind"] == "heart" and e["t"] < 29 for e in events)
     assert "snore" in seq and "wake" in seq
@@ -125,7 +130,7 @@ def test_waits_as_long_as_needed_for_a_finger(tmp_path):
     # 300 s with nobody touching the sensors (longer than stage 0's 120 s), then a finger.
     steps = [{"wait": 300}, {"cmd": "/finger on"}, {"say": "hi", "lang": "en"}]
     events = run_session(tmp_path, steps)
-    pulse_t = next(e["t"] for e in events if e["kind"] == "sensor" and "snoring" in e["text"])
+    pulse_t = next(e["t"] for e in events if is_pulse(e))
     stage1_t = next(e["t"] for e in events if e["kind"] == "stage" and e["stage"] == 1)
     assert pulse_t >= 300 and stage1_t > pulse_t
     assert not any(e["kind"] == "say" and e["t"] < pulse_t for e in events)   # silent until the pulse

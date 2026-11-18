@@ -25,6 +25,13 @@ GESTURES = {
     # Snoring: slow inhale / exhale around the sleep pose, antennas twitch on the exhale
     "snore": [Pose(pitch=24, z=-9, ant=(66, 70), dur=1.6), Pose(pitch=30, z=-15, ant=(78, 74), dur=2.0),
               Pose(pitch=30, z=-15, ant=(72, 80), dur=0.3)],
+    # Act 1, a fingertip lands: antennas twitch, a small inhale, still asleep (session flow v2)
+    "stir": [Pose(pitch=24, z=-9, ant=(55, 75), dur=0.25), Pose(pitch=20, z=-6, ant=(60, 60), dur=1.2),
+             Pose(pitch=22, z=-8, ant=(62, 64), dur=1.5)],
+    # The fingertip left: head dips toward the sensor, one antenna reaches for it
+    "check_sensor": [Pose(pitch=32, z=-6, roll=6, ant=(20, 60), dur=0.6), Pose(pitch=32, z=-6, roll=6, ant=(10, 60), dur=1.2)],
+    # The fingertip is back: a small jolt, antennas up
+    "mini_jolt": [Pose(pitch=-6, z=8, ant=(-30, -30), dur=0.15), Pose(pitch=0, z=4, ant=(-15, -15), dur=0.5)],
     # Wake-up: head lifts slowly, antennas twitch, stretch
     "wake": [Pose(pitch=25, z=-10, ant=(60, 60), dur=1.5), Pose(pitch=0, z=6, ant=(20, 20), dur=2.0),
              Pose(pitch=-12, z=12, ant=(-25, -25), roll=6, dur=1.0), Pose(ant=(5, -10), dur=0.3), Pose(ant=(-10, 5), dur=0.3), NEUTRAL],
