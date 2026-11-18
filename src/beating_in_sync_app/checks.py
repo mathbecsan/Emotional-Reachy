@@ -545,9 +545,10 @@ def mobility(robot, bus, group: str | None = None) -> dict:
     return {"ok": True, "done": done, "detail": f"All {len(done)} moves played"}
 
 
-BODY_FIX = ("The body motor has probably stopped itself after an overload (it does this to protect itself when it's "
-            "blocked). Check that nothing is touching the base or wrapped around it, then power-cycle Reachy: unplug its "
-            "power for 10 seconds, plug it back in, turn it on again in Reachy Mini Control, and press Connect Reachy.")
+BODY_FIX = ("The body motor isn't turning. It usually stops itself after an overload (when the base is blocked). "
+            "Check that nothing touches the base or is wrapped around it, then power-cycle Reachy: unplug the POWER "
+            "adapter (not only the USB cable) for 10 seconds, plug it back in, restart the robot software, and press "
+            "Connect Reachy. If it still doesn't turn, the body motor or its cable may need attention from Pollen support.")
 
 
 def body_check(robot) -> dict:
@@ -594,3 +595,4 @@ def chat_turn(text: str, listen_s: float = 7.0) -> dict:
     u = elevenlabs.ElevenLabsListener(clock).listen(listen_s)
     return {"ok": True, "heard": u.text if u else None, "lang": u.language if u else None,
             "speaker": "Reachy" if voice.device is not None else "this computer"}
+
