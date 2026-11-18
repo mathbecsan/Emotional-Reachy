@@ -7,14 +7,15 @@
 import { h, toast, setCrumbs, swap, isDebug } from "../ui.js";
 import { api, onEvent } from "../api.js";
 import { avatar } from "../components/avatar.js";
+import { speak, quiet, shortFix, praise, voiceOn, setVoice } from "../components/voice-guide.js";
 
 const STEPS = [
-  { key: "reachy", title: "Connect Reachy", costume: "base", color: "#5cc8ff", why: "This app needs to reach the robot, and every motor must respond." },
-  { key: "sensors", title: "Pulse sensors", costume: "smitten", color: "#ff5a6e", why: "The heartbeat wakes Reachy up and shapes its reactions." },
-  { key: "mic", title: "Microphone & sounds", costume: "tia", color: "#ff9a4d", why: "Reachy must understand speech, and recognise music, singing, claps and other sounds." },
-  { key: "talk", title: "Talk with Reachy", costume: "diva", color: "#ff6fb1", why: "A short chat: you hear Reachy clearly, and it understands your answers." },
-  { key: "mobility", title: "Range of motion", costume: "villain", color: "#b98cff", why: "Head, antennas and body move freely, with nothing in the way." },
-  { key: "see", title: "See & follow", costume: "noir", color: "#ffc94d", why: "Reachy sees where you look and turns its head and body to follow you, even beyond its camera's view." },
+  { key: "reachy", intro: "Let's make sure I can move. Press Connect Reachy and watch me.", title: "Connect Reachy", costume: "base", color: "#5cc8ff", why: "This app needs to reach the robot, and every motor must respond." },
+  { key: "sensors", intro: "Rest a finger lightly on a pulse sensor and keep still.", title: "Pulse sensors", costume: "smitten", color: "#ff5a6e", why: "The heartbeat wakes Reachy up and shapes its reactions." },
+  { key: "mic", intro: "Press Record speech and say a sentence to me. Then press Record a performance and clap, sing, or play some music.", title: "Microphone & sounds", costume: "tia", color: "#ff9a4d", why: "Reachy must understand speech, and recognise music, singing, claps and other sounds." },
+  { key: "talk", intro: "Press Start the chat. I'll ask you three quick questions.", title: "Talk with Reachy", costume: "diva", color: "#ff6fb1", why: "A short chat: you hear Reachy clearly, and it understands your answers." },
+  { key: "mobility", intro: "Clear the space around me, then press Run every move.", title: "Range of motion", costume: "villain", color: "#b98cff", why: "Head, antennas and body move freely, with nothing in the way." },
+  { key: "see", intro: "Sit in front of me, about one metre away, and press Start. Then do what I say.", title: "See & follow", costume: "noir", color: "#ffc94d", why: "Reachy sees where you look and turns its head and body to follow you, even beyond its camera's view." },
 ];
 const STORE = "bis.setup.v3";
 const loadResults = () => {
@@ -43,7 +44,10 @@ export function checkView(outlet, startKey) {
   const stage = h("section", { class: "setup__stage" });
   outlet.replaceChildren(h("div", { class: "setup" }, h("aside", { class: "setup__rail" },
     h("p", { class: "setup__kicker" }, "Setup checklist"), map,
-    h("button", { type: "button", class: "link-sm", onclick: () => { for (const k in results) delete results[k]; saveResults(results); show(0); } }, "Start over")),
+    h("button", { type: "button", class: "link-sm", onclick: () => { for (const k in results) delete results[k]; saveResults(results); show(0); } }, "Start over"),
+    h("label", { class: "voice-toggle", title: "Reachy says each instruction, progress and problems out loud" },
+      h("input", { type: "checkbox", checked: voiceOn(), onchange: (ev) => { setVoice(ev.target.checked); toast(ev.target.checked ? "Reachy's voice guide is on" : "Voice guide off"); } }),
+      h("span", { class: "switch__ui", "aria-hidden": "true" }), h("span", {}, "Voice guide"))),
   stage));
 
   function drawMap() {
@@ -65,11 +69,18 @@ export function checkView(outlet, startKey) {
   }
 
   // ------------------------------------------------------------------ building blocks
-  function feedback() {
+  function feedback(isLast = false) {
     const box = h("div", { class: "feedback", hidden: true, role: "status" });
+    const spoken = new Set();
     return {
       el: box,
-      set(state, title, meaning = "", fix = "") {
+      set(state, title, meaning = "", fix = "", { silent = false } = {}) {
+        // Say results out loud too: progress, what went wrong, what to do next (once per message).
+        if (!silent && state !== "wait" && !spoken.has(state + title)) {
+          spoken.add(state + title);
+          if (state === "pass") speak(`${praise()} ${title}. ${isLast ? "Press Finish." : "Press Next to continue."}`, { important: true });
+          else speak(`Hmm, there's a problem. ${title}. ${shortFix(fix) || "Press Retry to try again, or Repair if it keeps failing."}`, { important: true });
+        }
         box.hidden = false;
         box.dataset.state = state;
         box.replaceChildren(h("span", { class: "feedback__icon", "aria-hidden": "true" }, state === "pass" ? "✓" : state === "fail" ? "!" : "…"),
@@ -97,7 +108,7 @@ export function checkView(outlet, startKey) {
     });
     return b;
   };
-  const say = (text) => post("/api/check/say", { text }).catch(() => ({}));
+  const say = (text, important = false) => speak(text, { important });
 
   /** Live camera picture, fetched one frame at a time (no connection is held open). */
   function liveVideo(vp) {
@@ -196,6 +207,9 @@ export function checkView(outlet, startKey) {
       const finish = () => setResult("mic", t1.isDone() && t2.isDone() ? "pass" : "fail");
       const record = async (which) => {
         fb.set("wait", "Listening for 6 seconds…", which === 1 ? "Speak now, from where the participant will sit." : "Clap a rhythm, sing a line, or play a song now.");
+        await quiet();                       // never record Reachy's own voice
+        speak(which === 1 ? "Okay, go ahead." : "Okay, perform now.", { important: true });
+        await quiet();
         bars.classList.add("is-live");
         const r = await post("/api/check/sounds");
         bars.classList.remove("is-live");
@@ -295,7 +309,7 @@ export function checkView(outlet, startKey) {
         { text: "Look straight at Reachy", say: "First, look straight at me.", ok: (e) => e.state === "facing", zone: 0, part: 1 },
         { text: "Turn your head to the side", say: "Now turn your head to the side.", ok: (e) => e.state === "turned" || e.state === "tracking", zone: 0, part: 1 },
         { text: "Look back at Reachy", say: "And look back at me.", ok: (e) => e.state === "facing", zone: 0, part: 1 },
-        { text: "Stand up, in front of Reachy", say: "Great, I can see where you look. Now let's play follow me! Stand up in front of me.", ok: (e) => e.face && Math.abs(e.angle) < 15, zone: 0, part: 2 },
+        { text: "Stand up, in front of Reachy", say: "I can see where you look. Now let's play follow me! I'm facing forward: stand up right in front of me.", ok: (e) => e.face && Math.abs(e.angle) < 15, zone: 0, part: 2, center: true },
         { text: "Walk FAR to your left, past the edge of the camera", say: "Now walk far to your left, even out of my view. I'll turn my body to find you.", ok: (e) => e.face && e.angle > 45, zone: -1, part: 2 },
         { text: "Now walk FAR to your right", say: "Found you! Now walk all the way over to your right.", ok: (e) => e.face && e.angle < -45, zone: 1, part: 2 },
         { text: "Come back to the middle", say: "Perfect. Come back to the middle, in front of me.", ok: (e) => e.face && Math.abs(e.angle) < 18, zone: 0, part: 2 },
@@ -303,17 +317,35 @@ export function checkView(outlet, startKey) {
       const tasks = ROUND.map((r) => task(r.text));
       const pickerSlot = h("div");
       let step = -1, hold = 0, stopVideo = () => {}, maxBody = 0, following = false;
-      const setStep = (i) => {
+      let progressT = Date.now(), nudgeT = 0, lastE = null;
+      const setStep = (i, cheer = false) => {
         step = i;
+        progressT = Date.now();
         tasks.forEach((t, j) => t.el.classList.toggle("is-current", j === i));
         if (i >= ROUND.length) return;
         const r = ROUND[i];
+        if (r.center) post("/api/check/track/center").catch(() => {});   // so "in front of me" is unambiguous
         coach.dataset.zone = String(r.zone);
         coach.querySelector(".coach__text").textContent = r.text;
         coachHint.textContent = "";
         arc.dataset.target = String(r.zone);
         fb.set("wait", r.text, r.zone ? "Walk slowly. Reachy turns its head first, then its body. If you leave its view, it keeps turning to find you." : "");
-        say(r.say);
+        say(`${cheer ? praise() + " " : ""}${r.say}`, true);
+      };
+      // Stuck on a step for a while? Say exactly what to change, from what Reachy sees right now.
+      const nudge = () => {
+        if (step < 0 || step >= ROUND.length || Date.now() - progressT < 12000 || Date.now() - nudgeT < 12000) return;
+        nudgeT = Date.now();
+        const r = ROUND[step], e = lastE || {};
+        let text;
+        if (!e.face) text = "I can't see your face. Turn toward me, about one metre away, so I can find you.";
+        else if (r.zone === -1) text = e.angle > 25 ? "Almost! A few more steps to your left." : "Keep walking to your left, slowly.";
+        else if (r.zone === 1) text = e.angle < -25 ? "Almost! A few more steps to your right." : "Keep walking to your right, slowly.";
+        else if (r.part === 2) text = e.angle > 15 ? "You're on your left. Move toward the middle, in front of my base." : e.angle < -15 ? "You're on your right. Move toward the middle, in front of my base." : "Hold still for a second, facing me.";
+        else if (step === 1) text = "Turn your head clearly to the side, like you're looking at the wall.";
+        else text = "Look straight at me for a second.";
+        coachHint.textContent = `Reachy: “${text}”`;
+        say(text, true);
       };
       async function start() {
         tasks.forEach((t) => t.done(false)); hold = 0; maxBody = 0; active = true;
@@ -343,9 +375,11 @@ export function checkView(outlet, startKey) {
           return;
         }
         if (e.done) {                       // never "time out": if the camera test ends early, carry on
-          if (active && step < ROUND.length) post("/api/check/track").catch(() => {});
+          if (active && step < ROUND.length) { say("One moment, restarting my camera."); post("/api/check/track").catch(() => {}); }
           return;
         }
+        lastE = e;
+        nudge();
         if (e.ok === false) { fb.set("fail", "The camera didn't start", e.detail, e.fix); setResult("see", "fail"); return; }
         vp.dataset.state = e.state;
         maxBody = Math.max(maxBody, Math.abs(e.body || 0));
@@ -358,7 +392,7 @@ export function checkView(outlet, startKey) {
         hold = ROUND[step].ok(e) ? hold + 1 : 0;
         if (hold >= (ROUND[step].part === 1 ? 2 : 4)) {     // hold the position briefly so a glance doesn't count
           tasks[step].done(); hold = 0;
-          if (step < ROUND.length - 1) { setStep(step + 1); return; }
+          if (step < ROUND.length - 1) { setStep(step + 1, true); return; }
           setStep(ROUND.length);
           active = false;
           coach.querySelector(".coach__text").textContent = "Done!";
@@ -366,9 +400,8 @@ export function checkView(outlet, startKey) {
           // needs ~10-25 deg of body turn. 15 deg proves the body joined in; below that it didn't really move.
           const bodyOk = !following || maxBody >= 15;
           if (bodyOk) {
-            fb.set("pass", following ? `Reachy followed you all the way: head and body together (body turned up to ${maxBody}°)` : "Gaze and tracking work",
+            fb.set("pass", following ? `I followed you the whole way, head and body together (body turned up to ${maxBody}°)` : "Gaze and tracking work",
               following ? "" : "Connect Reachy to test the turning too.");
-            say("I followed you the whole way. Nice moves!");
             setResult("see", "pass");
           } else {
             fb.set("fail", "Reachy's head followed you, but its body barely turned", `The body turned only ${maxBody}°, the head did the rest.`,
@@ -377,7 +410,7 @@ export function checkView(outlet, startKey) {
           }
         }
       });
-      fb.set("wait", "Press Start, then follow Reachy's instructions.");
+      fb.set("wait", "Press Start, then follow Reachy's instructions (it says them out loud).");
       return () => { active = false; off(); stopVideo(); post("/api/check/track/stop").catch(() => {}); };
     },
   };
@@ -408,11 +441,18 @@ export function checkView(outlet, startKey) {
     navNext = null;
     idx = i;
     drawMap();
-    if (i >= STEPS.length) { swap(stage, summary()); setCrumbs([{ label: "Main menu", href: "#/menu" }, "Setup checklist", "Summary"]); return; }
+    if (i >= STEPS.length) {
+      swap(stage, summary());
+      setCrumbs([{ label: "Main menu", href: "#/menu" }, "Setup checklist", "Summary"]);
+      const missing = ["reachy", "sensors", "mic", "talk"].filter((k) => results[k] !== "pass").map((k) => STEPS.find((x) => x.key === k).title);
+      speak(missing.length ? `Setup finished, but these still need attention: ${missing.join(", ")}.` : "Setup complete! Everything works. Press Create a session when you're ready.", { important: true });
+      return;
+    }
     const s = STEPS[i];
     setCrumbs([{ label: "Main menu", href: "#/menu" }, "Setup checklist", `${i + 1} · ${s.title}`]);
-    const fb = feedback();
+    const fb = feedback(i === STEPS.length - 1);
     const area = h("div", { class: "screen__area" });
+    speak(`Step ${i + 1} of ${STEPS.length}: ${s.title}. ${s.intro}`, { important: true });
     const next = h("button", { type: "button", class: "btn btn--primary" }, i === STEPS.length - 1 ? "Finish →" : "Next →");
     next.addEventListener("click", () => show(i + 1));
     navNext = () => { const ok = done(i); next.disabled = !ok && !isDebug(); next.title = next.disabled ? "Pass this check, or press Skip" : ""; };

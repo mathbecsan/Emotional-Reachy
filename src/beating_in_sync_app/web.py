@@ -249,6 +249,13 @@ def mount_routes(app: FastAPI, runner: SessionRunner, bus: EventBus, cfg: Config
             logger.warning("couldn't save the camera choice: %s", e)
         return {"ok": True, "index": index}
 
+    @app.post("/api/check/track/center")
+    async def check_track_center() -> dict:
+        t = track["thread"]
+        if t is not None and t.is_alive():
+            t.center(3.0)
+        return {"ok": True}
+
     @app.post("/api/check/track/stop")
     async def check_track_stop() -> dict:
         t = track["thread"]
@@ -301,10 +308,10 @@ def mount_routes(app: FastAPI, runner: SessionRunner, bus: EventBus, cfg: Config
     async def check_say(body: dict) -> dict:
         """Reachy speaks a short instruction during the setup (e.g. the Follow me game)."""
         idle()
-        text = str(body.get("text", ""))[:200]
-        if not text or say_lock.locked():
+        text = str(body.get("text", ""))[:300]
+        if not text:
             return {"ok": False}
-        async with say_lock:
+        async with say_lock:                        # queue behind anything Reachy is already saying
             return await asyncio.to_thread(checks.speak, text)
 
     @app.get("/api/voices")

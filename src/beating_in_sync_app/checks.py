@@ -372,6 +372,11 @@ class TrackProbe(threading.Thread):
         self.jpeg: bytes | None = None      # latest frame with the face box, for the live preview
         self.last_hint_t = 0.0
         self.hinted: set[str] = set()
+        self.center_until = 0.0              # face forward (ignore the person) until this time
+
+    def center(self, seconds: float = 3.0) -> None:
+        """Turn back to face forward for a moment, e.g. before asking the person to stand in front."""
+        self.center_until = time.monotonic() + seconds
 
     def hint(self, code: str, text: str, force: bool = False) -> None:
         """Written hint on the page + spoken by Reachy (never twice within HINT_GAP, never over other speech)."""
@@ -481,6 +486,10 @@ class TrackProbe(threading.Thread):
                             self.hint("lost", "I can't find you. Come and stand in front of me, facing me.")
                     if gone > 20:
                         target_s *= 0.97                         # long gone: settle back to the middle
+                if now < self.center_until:              # facing forward on request: let head and body come home
+                    target_s = 0.0
+                    head_cmd += 0.2 * (0.0 - head_cmd)
+                    body_cmd += 0.12 * (0.0 - body_cmd)
                 # fast head, slow body (body only while the head is twisted), head within 35 deg of the body
                 head_cmd += 0.55 * (target_s - head_cmd)
                 if abs(head_cmd - body_cmd) > 12:

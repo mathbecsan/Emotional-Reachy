@@ -799,3 +799,8 @@ body[data-view="title"] .shell__outlet, body[data-view="menu"] .shell__outlet { 
 .coach__hint { margin: 4px 0 0; font-size: 15px; color: #e8e6f2; min-height: 1em; }
 .coach--warn { border-color: var(--warn); }
 .viewport[data-state="tracking"] .viewport__label { color: #ffb380; }
+.voice-toggle { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); cursor: pointer; position: relative; margin-top: 4px; }
+.voice-toggle input { position: absolute; opacity: 0; width: 40px; height: 22px; margin: 0; cursor: pointer; }
+.voice-toggle input:checked + .switch__ui { background: var(--ok); }
+.voice-toggle input:checked + .switch__ui::after { transform: translateX(18px); }
+.voice-toggle input:focus-visible + .switch__ui { outline: 2px solid var(--text); outline-offset: 2px; }

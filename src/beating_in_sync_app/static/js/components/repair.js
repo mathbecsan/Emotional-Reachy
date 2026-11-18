@@ -5,6 +5,7 @@
  */
 import { h, toast } from "../ui.js";
 import { api, onEvent } from "../api.js";
+import { speak } from "./voice-guide.js";
 
 const STEPS = [
   ["session", "No session running"], ["tests", "Stop leftover tests"], ["daemon", "Robot software"],
@@ -26,9 +27,14 @@ export function openRepair() {
       h("header", {}, h("h2", {}, "🔧 Repair"), h("p", { class: "muted" }, "Fixes what it can and restarts Reachy so the next test starts fresh. Takes about 30 seconds.")),
       h("ol", { class: "repair__list" }, Object.values(rows)), summary, h("div", { class: "btn-row repair__nav" }, closeBtn, again)));
   document.body.append(panel);
+  speak("Let me check everything and fix what I can. This takes about half a minute.", { important: true });
+  let firstFail = null;
   const off = onEvent((e) => {
     if (e.kind !== "repair") return;
+    if (e.status === "failed" && !firstFail) firstFail = e;
     if (e.done) {
+      speak(e.ok ? "All fixed! Everything is ready. You can run the setup checklist again."
+        : `I fixed what I could, but ${firstFail ? firstFail.label.toLowerCase() + " still needs you. " + (firstFail.fix || "").split(/(?<=[.!?])\s/)[0] : "something still needs you."}`, { important: true });
       summary.textContent = e.summary;
       summary.dataset.ok = String(e.ok);
       closeBtn.disabled = false;

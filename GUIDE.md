@@ -77,6 +77,15 @@ something fails, explains what it means and what to try.
 | **5 Range of motion** | Clear the space, press *Run every move* (or *Run* one group) | All 24 moves play; body turns are measured |
 | **6 See & follow** | *Start*, then do what Reachy says: look at it, turn away, look back; stand up, walk far to your left (out of its view), far to your right, back to the middle | Reachy sees where you look and turns its **body** to follow you (it searches when you leave its view) |
 
+**Reachy talks you through it** (switch off with *Voice guide* under the step map):
+
+- **Each step:** it introduces the step and says what to do.
+- **Progress:** it confirms when something is done ("Got it! … Press Next to continue").
+- **When you're stuck** for about 10 seconds: it gives a specific nudge ("You're on your right. Move toward the middle, in front of my base").
+- **When something fails:** it says what's wrong and the first thing to try.
+- **Repair:** it narrates the repair and says whether everything is fixed.
+- **Before "stand in front of me":** Reachy turns back to face forward first, so "in front" is clear.
+
 The **Summary** lists what's still needed. Reachy, sensors, microphone and the chat must pass before a real session.
 Once a step has been reached it stays open, so you can go back and re-test without locking the rest.
 
