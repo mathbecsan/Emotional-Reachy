@@ -80,15 +80,24 @@ def quick(runner) -> dict:
     return out
 
 
-def speak(text: str = "Hi! I'm Reachy. I can hear you, and now you can hear me.") -> dict:
+SPEECH_LOCK = threading.Lock()      # one voice at a time (instructions, hints, the chat)
+
+
+def speak(text: str = "Hi! I'm Reachy. I can hear you, and now you can hear me.", wait: bool = True) -> dict:
+    """Say `text` through Reachy. wait=False skips it if Reachy is already talking (used for hints)."""
     from . import elevenlabs
     from .clock import Clock
 
     if not elevenlabs.api_key():
         return {"ok": False, "detail": "No ElevenLabs key", "fix": "Add ELEVENLABS_API_KEY to .env."}
-    v = elevenlabs.ElevenLabsVoice(Clock(1.0))
-    t = time.monotonic()
-    v.say(text, "en", 1.0, "base")
+    if not SPEECH_LOCK.acquire(blocking=wait, timeout=15 if wait else -1):
+        return {"ok": False, "detail": "Reachy is already talking"}
+    try:
+        v = elevenlabs.ElevenLabsVoice(Clock(1.0))
+        t = time.monotonic()
+        v.say(text, "en", 1.0, "base")
+    finally:
+        SPEECH_LOCK.release()
     return {"ok": True, "detail": f"Played on {'Reachy' if v.device is not None else 'this computer'} ({time.monotonic() - t:.1f} s)"}
 
 
@@ -346,18 +355,52 @@ def sounds(seconds: float = 6.0) -> dict:
 
 # ---------------------------------------------------------------- face following
 class TrackProbe(threading.Thread):
-    """Camera test: finds the person, tells whether they face Reachy or are turned away,
-    and (with the robot connected) turns Reachy's head to follow them. Runs up to 40 s."""
+    """Camera test and follow-me: finds the person (YuNet CNN + short-term tracker), tells whether
+    they face Reachy, and turns Reachy's head and body to follow them, in the world frame, using
+    the robot's real angles at capture time (approach of Gaurav-Gosain/reachy_vision: fast head,
+    slow body that only turns while the head is twisted, head kept within 35 deg of the body).
+    When the person is lost Reachy keeps going their way, then sweeps gently, and says out loud
+    what the person should do. Runs until stopped (or 5 minutes)."""
 
-    def __init__(self, bus, robot=None, index: int = 0, seconds: float = 90):
+    HALF_FOV = 35.0          # deg: half the camera's horizontal field of view
+    HINT_GAP = 9.0           # s between two spoken hints
+
+    def __init__(self, bus, robot=None, index: int = 0, seconds: float = 300, coach: bool = True):
         super().__init__(daemon=True, name="track-probe")
-        self.bus, self.robot, self.index, self.seconds = bus, robot, index, seconds
+        self.bus, self.robot, self.index, self.seconds, self.coach = bus, robot, index, seconds, coach
         self.stop_event = threading.Event()
         self.jpeg: bytes | None = None      # latest frame with the face box, for the live preview
+        self.last_hint_t = 0.0
+        self.hinted: set[str] = set()
+
+    def hint(self, code: str, text: str, force: bool = False) -> None:
+        """Written hint on the page + spoken by Reachy (never twice within HINT_GAP, never over other speech)."""
+        now = time.monotonic()
+        self.bus.emit("track", hint=code, hint_text=text)
+        if not self.coach or (not force and now - self.last_hint_t < self.HINT_GAP):
+            return
+        self.last_hint_t = now
+        threading.Thread(target=lambda: speak(text, wait=False), daemon=True).start()
+
+    def _pose(self):
+        """Real (head_yaw, body_yaw) in degrees, world frame, or None without a robot."""
+        if self.robot is None:
+            return None
+        import numpy as np
+
+        try:
+            m = np.asarray(self.robot.get_current_head_pose())
+            j, _ = self.robot.get_current_joint_positions()
+            return float(np.rad2deg(np.arctan2(m[1, 0], m[0, 0]))), float(np.rad2deg(j[0]))
+        except Exception as e:  # link lost mid-test: keep reporting the camera
+            logger.debug("pose read failed: %s", e)
+            return None
 
     def run(self):
         try:
             import cv2
+
+            from .perception.face_detect import FaceFinder
         except ImportError:
             self.bus.emit("track", ok=False, detail="OpenCV not installed", fix="pip install -e '.[vision]'", done=True)
             return
@@ -366,114 +409,114 @@ class TrackProbe(threading.Thread):
             self.bus.emit("track", ok=False, detail="The camera didn't open",
                           fix="Allow the camera in System Settings › Privacy & Security › Camera, then try again.", done=True)
             return
-        front = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
-        side = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_profileface.xml")
-        clahe = cv2.createCLAHE(clipLimit=2.5, tileGridSize=(8, 8))
-        look = body = pitch = 0.0          # where Reachy looks / where its body points (deg, + = Reachy's left)
-        last_dir, lost_since = 0.0, None
-        recent: list[bool] = []            # face seen in the last frames: a track needs 3 of the last 5
-        confirmed_at, last_seen_look = None, 0.0
-        t0, seen_front, seen_away, moved = time.monotonic(), 0, 0, 0.0
-        last_x = None
-        np_ = __import__("numpy")
+        finder = FaceFinder()
         try:
             from reachy_mini.utils import create_head_pose
         except ImportError:
             create_head_pose = None
+        import numpy as np
+
+        head_cmd = body_cmd = target_s = pitch = 0.0
+        last_seen_yaw, last_dir, lost_since, found_once = 0.0, 0.0, None, False
+        t0 = last_send = time.monotonic()
+        seen_front = seen_away = 0
+        self.bus.emit("track", ok=True, engine=finder.engine, face=False, state="none", head_yaw=0, body=0)
         try:
             while not self.stop_event.is_set() and time.monotonic() - t0 < self.seconds:
+                pose = self._pose()                       # robot angles at capture time
                 ok, frame = cap.read()
                 if not ok:
-                    time.sleep(0.05)
+                    time.sleep(0.03)
                     continue
-                h_, w_ = frame.shape[:2]
-                gray = cv2.cvtColor(cv2.resize(frame, (w_ // 2, h_ // 2)), cv2.COLOR_BGR2GRAY)
-                gray = clahe.apply(gray)              # even out dim, uneven room light before looking for faces
-                faces = front.detectMultiScale(gray, 1.15, 6, minSize=(48, 48))
-                facing = len(faces) > 0
-                if not facing:
-                    faces = side.detectMultiScale(gray, 1.15, 6, minSize=(48, 48))
-                    if not len(faces):        # profile facing the other way: detect on the mirror, map back
-                        flipped = side.detectMultiScale(cv2.flip(gray, 1), 1.15, 6, minSize=(48, 48))
-                        faces = [(gray.shape[1] - x - fw, y, fw, fh) for (x, y, fw, fh) in flipped]
-                preview = cv2.resize(frame, (480, int(480 * h_ / w_)))
-                if len(faces):
-                    x, y, fw, fh = max(faces, key=lambda f: f[2] * f[3])
-                    k = 480 / (w_ / 2)
-                    cv2.rectangle(preview, (int(x * k), int(y * k)), (int((x + fw) * k), int((y + fh) * k)),
-                                  (168, 224, 123) if facing else (77, 201, 255), 3)
-                self.jpeg = cv2.imencode(".jpg", preview, [cv2.IMWRITE_JPEG_QUALITY, 65])[1].tobytes()
                 now = time.monotonic()
+                real_head, real_body = pose if pose else (head_cmd, body_cmd)
+                tgt = finder.find(frame)
+                h_, w_ = frame.shape[:2]
+                preview = cv2.resize(frame, (480, int(480 * h_ / w_)))
+                brightness = float(preview.mean())
+                if tgt is not None:
+                    k = 480 / finder.width
+                    x, y, bw, bh = (int(v * k) for v in tgt.box)
+                    col = (168, 224, 123) if tgt.source == "face" and tgt.frontal else (77, 201, 255) if tgt.source == "face" else (255, 160, 80)
+                    cv2.rectangle(preview, (x, y), (x + bw, y + bh), col, 3)
+                self.jpeg = cv2.imencode(".jpg", preview, [cv2.IMWRITE_JPEG_QUALITY, 65])[1].tobytes()
+
                 searching = False
-                recent = (recent + [bool(len(faces))])[-5:]
-                tracked = sum(recent) >= 3          # a single-frame (false) detection never moves Reachy
-                if len(faces) and tracked:
-                    lost_since = None
-                    confirmed_at = now
-                    fx = (x + fw / 2) / (w_ / 2) * 2 - 1
-                    fy = (y + fh / 2) / (h_ / 2) * 2 - 1
-                    if last_x is not None:
-                        moved += abs(fx - last_x)
-                    last_x = fx
-                    seen_front += facing
-                    seen_away += not facing
-                    step = -fx * 9                      # face right of centre -> turn right (negative)
-                    look = max(-160.0, min(160.0, look + step))
-                    if abs(step) > 1:
-                        last_dir = 1.0 if step > 0 else -1.0
-                    last_seen_look = look
-                    pitch = max(-20.0, min(20.0, pitch + fy * 3))
-                elif not len(faces):
+                if tgt is not None:
+                    if lost_since and now - lost_since > 1.5 and found_once:
+                        self.hint("found", "There you are!", force=True)
+                    lost_since, found_once = None, True
+                    # where the person is, in the world frame (+ = Reachy's left)
+                    person = real_head - tgt.x * self.HALF_FOV
+                    target_s += 0.35 * (person - target_s)
+                    if abs(person - last_seen_yaw) > 1:
+                        last_dir = 1.0 if person > last_seen_yaw else -1.0
+                    last_seen_yaw = person
+                    pitch = max(-20.0, min(20.0, pitch + tgt.y * 2.5))
+                    if tgt.source == "face":
+                        seen_front += tgt.frontal
+                        seen_away += not tgt.frontal
+                    if tgt.w > 0.45:
+                        self.hint("too_close", "You're very close! Take a step back so I can see your whole face.")
+                    elif tgt.w < 0.06:
+                        self.hint("too_far", "You're a bit far. Come a little closer to me.")
+                else:
                     lost_since = lost_since or now
                     gone = now - lost_since
-                    # Search only right after a confirmed track was lost: they probably walked out of view.
-                    # Keep turning their way for up to 70 deg past where they were last seen, then ease back.
-                    if confirmed_at and now - confirmed_at < 6 and last_dir and abs(look - last_seen_look) < 70 and abs(look) < 150:
-                        look = max(-155.0, min(155.0, look + last_dir * 4))
+                    if found_once and gone < 6 and last_dir and abs(target_s - last_seen_yaw) < 70:
+                        target_s = max(-150.0, min(150.0, target_s + last_dir * 3.5))   # keep going their way
                         searching = True
-                    elif gone > 8:                       # nobody for a while: settle back to the middle
-                        look *= 0.97
-                        body *= 0.97
-                        pitch *= 0.9
-                if len(faces) and not tracked:           # seen, but not confirmed yet: report, don't move
-                    fx = (x + fw / 2) / (w_ / 2) * 2 - 1
-                    fy = (y + fh / 2) / (h_ / 2) * 2 - 1
-                # The body follows once the head is more than 25 deg off it; the head never gets more than
-                # 40 deg from the body (body/coordination.py), so Reachy can't jam against itself.
-                gap = look - body
-                if abs(gap) > 25:
-                    body = max(-150.0, min(150.0, body + max(-5.0, min(5.0, gap - (20 if gap > 0 else -20)))))
-                look = max(body - 40, min(body + 40, look))
-                if self.robot is not None and create_head_pose is not None:
+                        if gone > 1.5:
+                            side = "left" if last_dir > 0 else "right"
+                            self.hint("lost", f"I lost you! I'm looking to my {side}. Step in front of me and face me.")
+                    elif gone > 6:
+                        # gentle sweep around the body, like reachy_vision's idle look-around
+                        target_s = body_cmd + 25 * np.sin((now - lost_since) * 0.6)
+                        searching = True
+                        if brightness < 45:
+                            self.hint("dark", "It's quite dark. Can you turn on a light, or face the light?")
+                        elif gone > 3 and not found_once:
+                            self.hint("none", "I can't see anyone yet. Sit about one metre in front of me and look at me.")
+                        else:
+                            self.hint("lost", "I can't find you. Come and stand in front of me, facing me.")
+                    if gone > 20:
+                        target_s *= 0.97                         # long gone: settle back to the middle
+                # fast head, slow body (body only while the head is twisted), head within 35 deg of the body
+                head_cmd += 0.55 * (target_s - head_cmd)
+                if abs(head_cmd - body_cmd) > 12:
+                    body_cmd += 0.08 * (target_s - body_cmd)
+                body_cmd = max(-150.0, min(150.0, body_cmd))
+                head_cmd = max(body_cmd - 35, min(body_cmd + 35, head_cmd))
+                if self.robot is not None and create_head_pose is not None and now - last_send >= 0.05:
+                    last_send = now
                     try:
-                        self.robot.set_target(head=create_head_pose(yaw=look, pitch=pitch, degrees=True), body_yaw=float(np_.deg2rad(body)))
-                    except Exception as e:  # robot link lost mid-test: keep reporting the camera
+                        self.robot.set_target(head=create_head_pose(yaw=head_cmd, pitch=pitch, degrees=True),
+                                              body_yaw=float(np.deg2rad(body_cmd)))
+                    except Exception as e:
                         logger.debug("follow failed: %s", e)
                         self.robot = None
                 left = round(self.seconds - (now - t0))
-                if len(faces) and tracked:
-                    # Where the person stands, in degrees from Reachy's front (+ = the person's left).
-                    # Following recentres the face in the picture, so add Reachy's own turn back in.
-                    angle = fx * 30 - (look if self.robot is not None else 0.0)
-                    self.bus.emit("track", ok=True, face=True, x=round(float(fx), 2), y=round(float(fy), 2),
-                                  state="facing" if facing else "turned", angle=round(float(angle)), head_yaw=round(look),
-                                  body=round(body), following=self.robot is not None, left=left,
-                                  facing_seen=seen_front, away_seen=seen_away, moved=round(moved, 1))
+                common = dict(ok=True, head_yaw=round(real_head), body=round(real_body), following=self.robot is not None,
+                              left=left, facing_seen=seen_front, away_seen=seen_away, dark=brightness < 45)
+                if tgt is not None:
+                    # + = the person's left (they face Reachy), relative to Reachy's front
+                    angle = -(real_head - tgt.x * self.HALF_FOV)
+                    self.bus.emit("track", face=True, x=round(tgt.x, 2), y=round(tgt.y, 2), size=round(tgt.w, 2),
+                                  state="facing" if tgt.source == "face" and tgt.frontal else "turned" if tgt.source == "face" else "tracking",
+                                  angle=round(angle), source=tgt.source, **common)
                 else:
-                    self.bus.emit("track", ok=True, face=False, state="search" if searching else "none", head_yaw=round(look),
-                                  body=round(body), following=self.robot is not None, left=left,
-                                  facing_seen=seen_front, away_seen=seen_away, moved=round(moved, 1))
-                time.sleep(0.08)
+                    self.bus.emit("track", face=False, state="search" if searching else "none", lost_s=round(now - (lost_since or now), 1), **common)
+                time.sleep(0.02)
         finally:
             cap.release()
-            if self.robot is not None:
+            if self.robot is not None and create_head_pose is not None:
                 try:
-                    from reachy_mini.utils import create_head_pose
+                    from .checks import goto_when_free
 
-                    self.robot.goto_target(head=create_head_pose(), body_yaw=0.0, duration=1.5)
+                    goto_when_free(self.robot, head=create_head_pose(), body_yaw=0.0, duration=1.5)
                 except Exception as e:
                     logger.debug("recenter failed: %s", e)
-            self.bus.emit("track", done=True, facing_seen=seen_front, away_seen=seen_away, moved=round(moved, 1))
+            self.bus.emit("track", done=True)
 
 
 # ---------------------------------------------------------------- range of motion

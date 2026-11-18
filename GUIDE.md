@@ -159,6 +159,7 @@ Anything it can't fix is shown in orange, with what to do. If it's all green, ru
 | The page says "offline" | The app isn't running: start it again (step 2 above). |
 | Reachy gets stuck mid-turn when you move the body by hand in Reachy Mini Control's controllers | The head and body must turn together: move the head's yaw along with the body yaw. This app does that automatically (the head always stays within 40° of the body, and big turns go in steps). |
 | Reachy's head moves but its body doesn't turn | The body motor has stopped itself after an overload. Make sure nothing touches or blocks the base, then power-cycle Reachy: unplug its power for 10 seconds, plug it back in, turn it on in Reachy Mini Control, and press **Connect Reachy**. |
+| See & follow loses you | Reachy says out loud what to do (step back, come closer, face it, turn on a light) and shows it under the instruction. It keeps following your shape for a few seconds when your face turns away, then searches your way and looks around: it doesn't give up or time out. |
 | The camera step says "No one in view" | Sit about an arm's length in front of Reachy, in good light (not in front of a window). |
 | The microphone step hears nothing | Speak from where the participant sits; check Reachy's USB cable. |
 | A session seems stuck | **End session**, then start a new one. Nothing is lost: the log is saved. |

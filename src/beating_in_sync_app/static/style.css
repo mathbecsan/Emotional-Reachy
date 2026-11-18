@@ -796,3 +796,6 @@ body[data-view="title"] .shell__outlet, body[data-view="menu"] .shell__outlet { 
 .repair__summary[data-ok="false"] { color: var(--warn); }
 .repair__nav { justify-content: flex-end; }
 .feedback__repair { margin-top: 8px; }
+.coach__hint { margin: 4px 0 0; font-size: 15px; color: #e8e6f2; min-height: 1em; }
+.coach--warn { border-color: var(--warn); }
+.viewport[data-state="tracking"] .viewport__label { color: #ffb380; }

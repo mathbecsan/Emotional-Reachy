@@ -83,7 +83,9 @@ class FacePerception(threading.Thread):
     def run(self):
         import cv2
         self._load_model()
-        frontal = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
+        from .face_detect import FaceFinder
+
+        finder = FaceFinder()                  # YuNet CNN + short-term tracker (face_detect.py)
         cap = cv2.VideoCapture(self.cfg.camera_index)
         ok = cap.isOpened() and cap.read()[0]
         if not ok:
@@ -105,14 +107,18 @@ class FacePerception(threading.Thread):
                 time.sleep(0.1)
                 continue
             gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-            faces = frontal.detectMultiScale(gray, 1.2, 5, minSize=(60, 60))
+            tgt = finder.find(frame)
             now = time.monotonic()
-            upd = {"face_visible": len(faces) > 0, "num_people": max(1, len(faces))}
-            if len(faces):
+            # "looking at Reachy" = a frontal face; turned away or followed only by the tracker counts as away
+            facing = tgt is not None and tgt.source == "face" and tgt.frontal
+            faces = [tgt] if facing else []
+            upd = {"face_visible": facing, "num_people": max(1, finder.count)}
+            if tgt is not None:
+                upd.update(face_x=round(tgt.x, 2), face_y=round(tgt.y, 2))
+            if facing:
                 last_seen = now
-                x, y, w, h = max(faces, key=lambda f: f[2] * f[3])      # closest person
-                fh, fw = gray.shape
-                upd.update(face_x=round(((x + w / 2) / fw) * 2 - 1, 2), face_y=round(((y + h / 2) / fh) * 2 - 1, 2))
+                k = gray.shape[1] / finder.width
+                x, y, w, h = (max(0, int(v * k)) for v in tgt.box)
                 if self.model is not None:
                     label, conf = self._predict(gray[y:y + h, x:x + w])
                     # exponential smoothing so one noisy frame doesn't flip Reachy's mood
@@ -126,8 +132,9 @@ class FacePerception(threading.Thread):
                 upd["motion_energy"] = round(min(1.0, float(diff.mean()) / 25.0), 2)
             prev_gray = gray
             self.hub.update(**upd)
-            if self.show:
-                for (x, y, w, h) in faces:
-                    cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 200, 255), 2)
+            if self.show and faces:
+                k = gray.shape[1] / finder.width
+                x, y, w, h = (int(v * k) for v in faces[0].box)
+                cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 200, 255), 2)
                 cv2.imshow("reachy eyes", frame)
                 cv2.waitKey(1)

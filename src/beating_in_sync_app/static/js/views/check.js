@@ -101,7 +101,7 @@ export function checkView(outlet, startKey) {
 
   /** Live camera picture, fetched one frame at a time (no connection is held open). */
   function liveVideo(vp) {
-    const img = h("img", { class: "viewport__video", alt: "Live view from the camera" });
+    const img = h("img", { class: "viewport__video", alt: "" });
     vp.prepend(img);
     let on = true, misses = 0;
     const next = () => { if (on) img.src = `/api/check/track/frame.jpg?t=${Date.now()}`; };
@@ -288,15 +288,17 @@ export function checkView(outlet, startKey) {
       const arc = h("div", { class: "arc", "aria-hidden": "true" },
         h("span", { class: "arc__zone arc__zone--l" }, "your left"), h("span", { class: "arc__zone arc__zone--m" }, "middle"), h("span", { class: "arc__zone arc__zone--r" }, "your right"),
         h("span", { class: "arc__you" }, "you"), h("span", { class: "arc__reachy" }));
-      const coach = h("div", { class: "coach" }, h("span", { class: "coach__arrow", "aria-hidden": "true" }), h("strong", { class: "coach__text" }, "Sit in front of Reachy and look at it"));
+      const coachHint = h("p", { class: "coach__hint", role: "status" });
+      const coach = h("div", { class: "coach" }, h("span", { class: "coach__arrow", "aria-hidden": "true" }),
+        h("div", {}, h("strong", { class: "coach__text" }, "Sit in front of Reachy and look at it"), coachHint));
       const ROUND = [
         { text: "Look straight at Reachy", say: "First, look straight at me.", ok: (e) => e.state === "facing", zone: 0, part: 1 },
-        { text: "Turn your head to the side", say: "Now turn your head to the side.", ok: (e) => e.state === "turned", zone: 0, part: 1 },
+        { text: "Turn your head to the side", say: "Now turn your head to the side.", ok: (e) => e.state === "turned" || e.state === "tracking", zone: 0, part: 1 },
         { text: "Look back at Reachy", say: "And look back at me.", ok: (e) => e.state === "facing", zone: 0, part: 1 },
         { text: "Stand up, in front of Reachy", say: "Great, I can see where you look. Now let's play follow me! Stand up in front of me.", ok: (e) => e.face && Math.abs(e.angle) < 15, zone: 0, part: 2 },
         { text: "Walk FAR to your left, past the edge of the camera", say: "Now walk far to your left, even out of my view. I'll turn my body to find you.", ok: (e) => e.face && e.angle > 45, zone: -1, part: 2 },
         { text: "Now walk FAR to your right", say: "Found you! Now walk all the way over to your right.", ok: (e) => e.face && e.angle < -45, zone: 1, part: 2 },
-        { text: "Come back to the middle", say: "Perfect. Come back to the middle.", ok: (e) => e.face && Math.abs(e.angle) < 15, zone: 0, part: 2 },
+        { text: "Come back to the middle", say: "Perfect. Come back to the middle, in front of me.", ok: (e) => e.face && Math.abs(e.angle) < 18, zone: 0, part: 2 },
       ];
       const tasks = ROUND.map((r) => task(r.text));
       const pickerSlot = h("div");
@@ -308,12 +310,13 @@ export function checkView(outlet, startKey) {
         const r = ROUND[i];
         coach.dataset.zone = String(r.zone);
         coach.querySelector(".coach__text").textContent = r.text;
+        coachHint.textContent = "";
         arc.dataset.target = String(r.zone);
         fb.set("wait", r.text, r.zone ? "Walk slowly. Reachy turns its head first, then its body. If you leave its view, it keeps turning to find you." : "");
         say(r.say);
       };
       async function start() {
-        tasks.forEach((t) => t.done(false)); hold = 0; maxBody = 0;
+        tasks.forEach((t) => t.done(false)); hold = 0; maxBody = 0; active = true;
         const r = await post("/api/check/track");
         following = r.following;
         if (!following) toast("Reachy isn't connected: only the camera is tested (no turning).", "error");
@@ -331,13 +334,24 @@ export function checkView(outlet, startKey) {
           h("button", { type: "button", class: "link-sm", onclick: () => choose() }, "Wrong camera? Choose another"))),
       h("div", { class: "btn-row" }, busyBtn("▶ Start", start)), pickerSlot,
       h("p", { class: "muted small" }, "Reachy follows people with its camera, and turns its body to search when they walk out of view. Following a voice by sound alone isn't available in this version."));
+      let active = false;
       const off = onEvent((e) => {
         if (e.kind !== "track" || step < 0) return;
-        if (e.done) { if (step < ROUND.length) fb.set("fail", "The test timed out", "", "Press Start and follow Reachy's instructions."); return; }
+        if (e.hint) {                       // Reachy's spoken hint, also shown in writing
+          coachHint.textContent = `Reachy: “${e.hint_text}”`;
+          coach.classList.toggle("coach--warn", e.hint !== "found");
+          return;
+        }
+        if (e.done) {                       // never "time out": if the camera test ends early, carry on
+          if (active && step < ROUND.length) post("/api/check/track").catch(() => {});
+          return;
+        }
         if (e.ok === false) { fb.set("fail", "The camera didn't start", e.detail, e.fix); setResult("see", "fail"); return; }
         vp.dataset.state = e.state;
         maxBody = Math.max(maxBody, Math.abs(e.body || 0));
-        label.textContent = e.state === "search" ? "Searching for you…" : e.face ? `${e.state === "facing" ? "Facing Reachy" : "Turned away"} · ${e.angle > 8 ? "your left" : e.angle < -8 ? "your right" : "middle"}${e.following ? ` · body ${e.body}°` : ""}` : "No one in view";
+        const where = e.angle > 10 ? "your left" : e.angle < -10 ? "your right" : "middle";
+        label.textContent = e.state === "search" ? "Looking for you…" :
+          e.face ? `${e.state === "facing" ? "Facing Reachy" : e.state === "turned" ? "Turned away" : "Following your shape"} · ${where}${e.following ? ` · body ${e.body}°` : ""}` : "No one in view";
         if (e.face) arc.style.setProperty("--pos", String(Math.max(-1, Math.min(1, -e.angle / 70))));
         arc.classList.toggle("has-you", !!e.face);
         if (step >= ROUND.length) return;
@@ -346,6 +360,7 @@ export function checkView(outlet, startKey) {
           tasks[step].done(); hold = 0;
           if (step < ROUND.length - 1) { setStep(step + 1); return; }
           setStep(ROUND.length);
+          active = false;
           coach.querySelector(".coach__text").textContent = "Done!";
           const bodyOk = !following || maxBody >= 40;
           if (bodyOk) {
@@ -360,7 +375,7 @@ export function checkView(outlet, startKey) {
         }
       });
       fb.set("wait", "Press Start, then follow Reachy's instructions.");
-      return () => { off(); stopVideo(); post("/api/check/track/stop").catch(() => {}); };
+      return () => { active = false; off(); stopVideo(); post("/api/check/track/stop").catch(() => {}); };
     },
   };
 
