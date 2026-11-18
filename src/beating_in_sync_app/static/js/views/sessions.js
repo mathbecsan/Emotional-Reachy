@@ -63,8 +63,22 @@ export function replayView(outlet, name) {
     const stop = log.events.find((e) => e.kind === "stop");
     const peak = log.heart.reduce((a, c) => (c[1] > a[1] ? c : a), [0, 0]);
     const peakStage = Object.entries(stageStart).filter(([, s]) => s <= peak[0]).pop()?.[0];
+    // Off-Brand: one row per persona stint (spec: log switches and stop-word use to see which
+    // personas produced the strongest reactions) -- replies, laughs and peak BPM while it was on.
+    const switches = log.events.filter((e) => e.kind === "persona");
+    const stints = switches.map((e, i) => {
+      const end = switches[i + 1]?.t ?? Infinity;
+      const heard = log.events.filter((x) => x.kind === "heard" && x.text && x.t >= e.t && x.t < end);
+      const bpm = log.heart.filter(([ht]) => ht >= e.t && ht < end).map(([, b]) => b);
+      return `${MODES[e.persona]?.label || e.persona} (${e.reason}): ${heard.length} replies` +
+        `${heard.filter((x) => (x.cues || []).includes("laugh")).length ? `, ${heard.filter((x) => (x.cues || []).includes("laugh")).length} laughs` : ""}` +
+        `${bpm.length ? `, peak ${Math.round(Math.max(...bpm))} BPM` : ""}`;
+    });
+    const resets = switches.filter((e) => e.reset && e.reason !== "close").length;
     summary.replaceChildren(
       h("dl", { class: "who" },
+        ...(switches.length ? [h("dt", {}, "Personalities"), h("dd", {}, h("ol", { class: "pd__lines" }, stints.map((x) => h("li", {}, x)))),
+          h("dt", {}, "Resets to Base"), h("dd", {}, String(resets))] : []),
         h("dt", {}, "Baseline"), h("dd", {}, baseline ? `${Math.round(baseline)} BPM` : "—"),
         h("dt", {}, "Peak"), h("dd", {}, peak[1] ? `${Math.round(peak[1])} BPM at ${fmtTime(peak[0])} (stage ${peakStage}: ${STAGES[peakStage]?.name})` : "—"),
         h("dt", {}, "Persona moves seen"), h("dd", {}, seen.map((m) => MODES[m].label).join(", ") || "none"),

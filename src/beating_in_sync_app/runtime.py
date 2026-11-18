@@ -14,6 +14,7 @@ import httpx
 from . import elevenlabs
 from .body.moves import ReachyMiniBody, SimBody
 from .body.voice import MacVoice, SimVoice
+from .brain.persona_show import PersonaShow
 from .brain.user_model import UserModel
 from .brain.writer import ClaudeWriter, TemplateWriter
 from .clock import Clock
@@ -23,7 +24,7 @@ from .perception.heart import HeartAnalyzer, SimHeartSource
 from .perception.pulse_sensor import ArduinoPulseSource, SimulatedArduino
 from .perception.speech import ConsoleListener, ScriptedListener, WebListener
 from .perception.text import TextAnalyzer, TextEmotion
-from .personality import load_profile
+from .personality import MODE_PERSONALITIES, default_selection, load_profile
 from .session import Session
 from .session_log import SessionLog
 from .signals import SignalHub
@@ -48,6 +49,10 @@ class SessionOptions:
     time_scale: float = 1.0
     heart_port: str | None = None   # Arduino serial port; None = auto-detect
     pulse_mode: str | None = None   # wake | one | two; None = Config.pulse_mode
+    personas: list[str] | None = None   # cast / persona moves for this session; None = the profile's default
+    switch_every: int | None = None     # Off-Brand: exchanges per persona; None = profile default
+    heart_wake: bool = True             # Reachy sleeps (and snores) until a heartbeat arrives
+    music: bool | None = None           # stage 5 dance; None = profile default
 
 
 class SessionRunner:
@@ -118,6 +123,15 @@ class SessionRunner:
             FacePerception(cfg, hub, session_log=log).start()
 
         profile = load_profile(opts.profile)
+        selection = opts.personas if opts.personas is not None else default_selection(profile)
+        show, flirty = None, True
+        if profile.kind == "personas":
+            show = PersonaShow(selection, opts.switch_every or profile.switch_every, rng, opts.no_tease)
+            log.event("cast", 0.0, cast=show.cast, switch_every=show.switch_every)
+        else:
+            # Facilitator's pick of persona moves for stage 4 (Flirty + the provocations).
+            profile.provocations = [k for k in selection if k in MODE_PERSONALITIES and k != "flirty"]
+            flirty = "flirty" in selection
         templates = TemplateWriter(rng)
         writer = templates
         if opts.llm:
@@ -147,7 +161,8 @@ class SessionRunner:
                 logger.error("Could not set up the live agent (%s); using the scripted conversation.", e)
                 self.bus.emit("error", message=f"Live conversation unavailable ({e}); using scripted mode.")
         session = Session(cfg, clock, hub, heart, body, voice, writer, log, user, profile, sim_heart, rng,
-                          realtime_agent=agent_id)
+                          realtime_agent=agent_id, show=show, heart_wake=opts.heart_wake,
+                          music=profile.music if opts.music is None else opts.music, flirty=flirty)
 
         if opts.listener == "scenario":
             listener = ScriptedListener(opts.scenario, session.on_command, clock)
@@ -172,6 +187,17 @@ class SessionRunner:
         if self.web_listener is None or not self.running:
             raise RuntimeError("no session listening for typed input")
         self.web_listener.push(text, language)
+
+    def preview_gesture(self, name: str) -> None:
+        """Try a gesture from the persona catalog (on the running session's body, or a spare one)."""
+        if self.session is not None and self.running:
+            self.session.body.play(name)
+            return
+        if self.robot is None:
+            raise RuntimeError("no robot connected (start the app with --robot)")
+        if getattr(self, "_preview_body", None) is None:
+            self._preview_body = ReachyMiniBody(self.robot, use_emotion_library=False)
+        self._preview_body.play(name)
 
     def wait(self) -> None:
         if self.thread:

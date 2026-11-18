@@ -11,73 +11,18 @@ import { reachyFace } from "../components/reachy-face.js";
 import { stageTimeline } from "../components/stage-timeline.js";
 import { transcript } from "../components/transcript.js";
 import { sensorPanel } from "../components/sensor-panel.js";
+import { personaStrip } from "../components/persona-strip.js";
 
-function startForm(onStarted) {
-  const form = h("form", { class: "start card" });
-  const field = (label, input, hint) => h("label", { class: "field" }, h("span", { class: "field__label" }, label), input,
-    hint ? h("span", { class: "field__hint" }, hint) : null);
-  const participant = h("input", { name: "participant", value: "P01", required: true, autocomplete: "off" });
-  const profile = h("select", { name: "profile" });
-  const lang = h("select", { name: "language_hint" }, Object.entries(LANGS).map(([k, v]) => h("option", { value: k }, v)));
-  const noTease = h("input", { type: "checkbox", name: "no_tease" });
-  const llm = h("input", { type: "checkbox", name: "llm", checked: true });
-  const heart = h("select", { name: "heart" },
-    h("option", { value: "sim" }, "Simulated heart (no hardware)"),
-    h("option", { value: "arduino" }, "Arduino pulse sensors"),
-    h("option", { value: "arduino-sim" }, "Arduino pipeline, simulated signal"));
-  const port = h("select", { name: "heart_port" }, h("option", { value: "" }, "auto-detect"));
-  const camera = h("input", { type: "checkbox", name: "camera", checked: true });
-  const listener = h("select", { name: "listener" },
-    h("option", { value: "elevenlabs" }, "Reachy's microphone (ElevenLabs) + typed"),
-    h("option", { value: "web" }, "Typed here only (rehearsal / Wizard-of-Oz)"),
-    h("option", { value: "mic" }, "Microphone (local Whisper)"));
-  const conversation = h("select", { name: "conversation" },
-    h("option", { value: "realtime" }, "Live & fluid (ElevenLabs agent with Reachy's personality)"),
-    h("option", { value: "scripted" }, "Scripted (Director + offline lines / Claude)"));
-  const voice = h("select", { name: "voice" },
-    h("option", { value: "elevenlabs" }, "ElevenLabs, from Reachy's speaker"),
-    h("option", { value: "mac" }, "macOS voice"),
-    h("option", { value: "sim" }, "Text only (silent)"));
-  const scale = h("select", { name: "time_scale" }, [1, 2, 5, 10].map((s) => h("option", { value: s }, s === 1 ? "Real time" : `${s}× faster`)));
-  const portRow = field("Serial port", port, "Close the Arduino IDE serial monitor and pulse_triple.py first: only one program can read the port.");
-  const syncPort = () => { portRow.hidden = heart.value !== "arduino"; };
-  heart.addEventListener("change", syncPort);
-
-  api("/api/profiles").then((ps) => ps.forEach((p) => profile.append(h("option", { value: p.name }, `${p.display_name} — ${p.description}`))));
-  api("/api/ports").then((ps) => ps.forEach((p) => port.append(h("option", { value: p.device }, `${p.device}${p.description ? " · " + p.description : ""}`)))).catch(() => {});
-  syncPort();
-
-  form.append(
-    h("h2", { class: "card__title" }, "New session"),
-    h("p", { class: "start__lede" }, "Run the pre-interview first. Reachy starts asleep; the participant's heartbeat wakes it."),
-    h("div", { class: "start__grid" },
-      field("Participant ID", participant),
-      field("Personality", profile),
-      field("Start language", lang, "Reachy switches to the participant's language in stage 2."),
-      field("Heart", heart),
-      portRow,
-      field("Conversation", conversation, "Live: Reachy listens continuously, answers anything, asks its own questions."),
-      field("Participant speech", listener),
-      field("Reachy voice", voice),
-      field("Clock", scale, "Faster clocks are for rehearsals only."),
-      h("label", { class: "check" }, noTease, " Would rather not be teased (skips stage 4)"),
-      h("label", { class: "check" }, llm, " Claude writes Reachy's lines (otherwise offline templates)"),
-      h("label", { class: "check" }, camera, " Camera: face emotion + attention")),
-    h("button", { class: "btn btn--primary", type: "submit" }, "Start session"));
-
-  form.addEventListener("submit", async (ev) => {
-    ev.preventDefault();
-    try {
-      await api("/api/session/start", {
-        participant: participant.value.trim(), profile: profile.value, language_hint: lang.value,
-        no_tease: noTease.checked, llm: llm.checked, heart: heart.value, heart_port: port.value || null,
-        camera: camera.checked, listener: listener.value, voice: voice.value, time_scale: Number(scale.value),
-        conversation: conversation.value,
-      });
-      onStarted();
-    } catch (e) { toast(e.message, "error"); }
-  });
-  return form;
+function idlePanel() {
+  const presets = h("div", { class: "idle__presets" });
+  api("/api/presets").then((ps) => presets.replaceChildren(...ps.map((p) => h("a", { class: "idle__preset", href: `#/build/${encodeURIComponent(p.id)}` },
+    h("strong", {}, p.name), p.description ? h("small", {}, p.description) : null)))).catch(() => {});
+  return h("section", { class: "start card idle" },
+    h("div", { class: "idle__head" },
+      h("div", {}, h("h2", { class: "card__title" }, "No session running"),
+        h("p", { class: "start__lede" }, "Build a session: pick the script, the personalities and their order, the participant and the hardware. Reachy starts asleep; a heartbeat wakes it.")),
+      h("a", { class: "btn btn--primary", href: "#/build" }, "Build a session")),
+    h("h3", { class: "card__sub" }, "Or start from a preset"), presets);
 }
 
 function controls(getLang) {
@@ -128,6 +73,7 @@ export function liveView(outlet) {
   const timeline = stageTimeline();
   const log = transcript();
   const sensors = sensorPanel();
+  const strip = personaStrip();
   const who = h("dl", { class: "who" });
   const ctl = controls();
   const banner = h("div", { class: "banner", hidden: true });
@@ -135,6 +81,7 @@ export function liveView(outlet) {
   const layout = h("div", { class: "live" },
     timeline.el,
     banner,
+    strip.el,
     h("div", { class: "live__cols" },
       h("div", { class: "live__left" },
         h("section", { class: "card mode" }, face.el,
@@ -151,7 +98,7 @@ export function liveView(outlet) {
   let running = false, baseline = null, overSince = null;
 
   function showStart() {
-    startWrap.replaceChildren(startForm(() => toast("Session started")));
+    startWrap.replaceChildren(idlePanel());
     outlet.replaceChildren(startWrap, layout);
     layout.classList.add("live--idle");
   }
@@ -190,7 +137,7 @@ export function liveView(outlet) {
       }
       case "session":
         if (e.status === "running") {
-          chart.reset(); log.reset(); timeline.reset(); sensors.reset(); baseline = null;
+          chart.reset(); log.reset(); timeline.reset(); sensors.reset(); strip.reset(); baseline = null;
           banner.hidden = true; ctl.setLang(e.language_hint);
           setRunning(true);
         } else {
@@ -232,6 +179,11 @@ export function liveView(outlet) {
         log.note(`Stage ${e.stage}${e.skipped ? " skipped" : ""}`, "line--stage");
         break;
       case "stage_clock": timeline.set(e.stage, e.ts, e.seconds); break;
+      case "cast": strip.setCast(e.cast); break;
+      case "persona":
+        strip.setPersona(e);
+        if (e.reason !== "start") log.note(`${e.reset ? "Back to" : "Glitch →"} ${MODES[e.persona]?.label || e.persona} (${e.reason})`, "line--stage");
+        break;
       case "baseline": baseline = e.bpm; chart.setBaseline(e.bpm); bpmMeta.textContent = `baseline ${Math.round(e.bpm || 0)}`; break;
       case "turn":
         log.turn(e);
@@ -239,7 +191,7 @@ export function liveView(outlet) {
         face.setMode(e.mode);
         modeName.textContent = MODES[e.mode]?.label || e.mode;
         modeAct.textContent = ` · ${e.act}`;
-        modeWhy.textContent = e.why;
+        modeWhy.textContent = e.why || "";
         layout.style.setProperty("--mode", MODES[e.mode]?.color || "#fff");
         break;
       case "say": log.reachy(e); face.speak(true); face.listen(false); break;

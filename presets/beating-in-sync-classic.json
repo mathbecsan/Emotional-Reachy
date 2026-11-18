@@ -1,0 +1,5 @@
+{
+  "name": "Beating in Sync: classic",
+  "description": "The original protocol (stages 0-7) with all four persona moves and the music stage.",
+  "options": {"profile": "beating_in_sync", "personas": ["flirty", "teasing", "offended", "scolding"], "heart_wake": true, "music": true}
+}

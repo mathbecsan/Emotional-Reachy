@@ -38,6 +38,10 @@ class EventBus:
             self.state.update(mode=e["mode"], act=e["act"], why=e["why"])
         elif k == "user":
             self.state["user"] = e["user"]
+        elif k == "cast":
+            self.state.update(cast=e["cast"], switch_every=e.get("switch_every"))
+        elif k == "persona":
+            self.state.update(persona=e["persona"], cast=e.get("cast", self.state.get("cast")))
         elif k == "senses":
             self.state["senses"] = e["senses"]
 

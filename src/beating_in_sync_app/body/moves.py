@@ -57,7 +57,7 @@ class BaseBody:
         self._thread.start()
 
     def _runner(self, name_or_seq, loop, stop):
-        seq = GESTURES[name_or_seq] if isinstance(name_or_seq, str) else name_or_seq
+        seq = GESTURES.get(name_or_seq, GESTURES["curious"]) if isinstance(name_or_seq, str) else name_or_seq
 
         def run() -> None:
             while True:

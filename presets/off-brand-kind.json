@@ -1,0 +1,5 @@
+{
+  "name": "Off-Brand: no teasing",
+  "description": "Only the personas that never tease the participant.",
+  "options": {"profile": "off_brand_reachy", "personas": ["base", "tia", "hype_bro", "noir", "burned_out", "hypochondriac"], "switch_every": 4, "heart_wake": true, "music": false, "no_tease": true}
+}

@@ -44,7 +44,7 @@ export function reachyFace() {
 
   let speaking = null;
   function setMode(mode) {
-    const p = POSES[mode] || POSES.curious;
+    const p = POSES[mode] || POSES[MODES[mode]?.pose] || POSES.curious;
     svg.style.setProperty("--mode", MODES[mode]?.color || "#fff");
     head.style.transform = `translate(${p.turn}px, ${p.dy}px) rotate(${p.tilt}deg)`;
     antL.style.transform = `rotate(${-p.ant[0]}deg)`;

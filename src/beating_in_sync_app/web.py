@@ -15,10 +15,12 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+from .body.gestures import EXPRESS_GESTURES, GESTURES
+from .brain.personas import BASE, DEFAULT_ORDER, catalog
 from .config import Config
 from .events import EventBus
 from .perception.pulse_sensor import list_ports
-from .personality import list_profiles, load_profile
+from .personality import PROFILES_DIR, default_selection, list_profiles, load_profile, selectable
 from .runtime import SessionOptions, SessionRunner
 
 
@@ -29,6 +31,22 @@ STATIC_DIR = Path(__file__).parent / "static"
 
 class CommandBody(BaseModel):
     cmd: str
+
+
+class PresetBody(BaseModel):
+    name: str
+    description: str = ""
+    options: dict
+
+
+PRESETS_DIR = PROFILES_DIR.parent / "presets"
+
+
+def _preset_path(name: str) -> Path:
+    slug = "".join(ch if ch.isalnum() or ch in "-_" else "-" for ch in name.strip().lower()).strip("-")
+    if not slug:
+        raise HTTPException(400, "preset name is empty")
+    return PRESETS_DIR / f"{slug}.json"
 
 
 class SayBody(BaseModel):
@@ -76,8 +94,52 @@ def mount_routes(app: FastAPI, runner: SessionRunner, bus: EventBus, cfg: Config
         for name in list_profiles():
             p = load_profile(name)
             out.append({"name": name, "display_name": p.display_name, "description": p.description,
-                        "accent": p.accent, "provocations": p.provocations})
+                        "accent": p.accent, "provocations": p.provocations, "kind": p.kind,
+                        "selectable": selectable(p), "default_selection": default_selection(p),
+                        "switch_every": p.switch_every, "music": p.music})
         return out
+
+    @app.get("/api/personas")
+    async def personas() -> dict:
+        return {"personas": catalog(), "base": BASE, "default_order": DEFAULT_ORDER, "gestures": EXPRESS_GESTURES}
+
+    @app.post("/api/gesture/{name}")
+    async def gesture(name: str) -> dict:
+        if name not in GESTURES:
+            raise HTTPException(404, "unknown gesture")
+        try:
+            runner.preview_gesture(name)
+        except RuntimeError as e:
+            raise HTTPException(409, str(e)) from e
+        return {"status": "playing", "gesture": name}
+
+    @app.get("/api/presets")
+    async def presets() -> list[dict]:
+        out = []
+        for p in sorted(PRESETS_DIR.glob("*.json")) if PRESETS_DIR.is_dir() else []:
+            try:
+                out.append({"id": p.stem, **json.loads(p.read_text(encoding="utf-8"))})
+            except json.JSONDecodeError:
+                logger.warning("Skipping unreadable preset %s", p)
+        return out
+
+    @app.post("/api/presets")
+    async def save_preset(body: PresetBody) -> dict:
+        known = {f.name for f in fields(SessionOptions)} - {"participant"}
+        path = _preset_path(body.name)
+        PRESETS_DIR.mkdir(exist_ok=True)
+        data = {"name": body.name.strip(), "description": body.description.strip(),
+                "options": {k: v for k, v in body.options.items() if k in known}}
+        path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+        return {"id": path.stem, **data}
+
+    @app.delete("/api/presets/{preset_id}")
+    async def delete_preset(preset_id: str) -> dict:
+        path = _preset_path(preset_id)
+        if not path.exists():
+            raise HTTPException(404, "no such preset")
+        path.unlink()
+        return {"status": "deleted"}
 
     @app.get("/api/ports")
     async def ports() -> list[dict]:

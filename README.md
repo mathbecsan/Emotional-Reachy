@@ -130,9 +130,44 @@ Personalities live in `profiles/<name>/profile.md` (TOML front matter + persona
 prompt). `gentle` has no provocation stage. The safety rules are appended to
 every profile and can't be edited away.
 
+## Off-Brand Reachy (persona interview)
+
+From "Off-Brand Reachy: Persona Script & App Spec": Reachy interviews the
+participant and slips between personas a cute robot "shouldn't" have, all in
+one voice, so it feels like one robot losing control of its personality.
+
+- **Cast** (`src/beating_in_sync_app/brain/personas.py`, the single source of truth):
+  Base Reachy, Bored teenager, Burned-out employee, Noir detective, Diva
+  celebrity, Hype-bro life coach, Villain, Tía chismosa, Hypochondriac, plus
+  idea-bank personas (Very flirty, Jealous, Smug, Passive-aggressive, Grumpy,
+  Melodramatic). Each has its goal, delivery, bridges, questions, reactions with
+  the participant's own words, silence and barge-in lines, camera reactions and gestures.
+- **Gestures**: the spec's 33 `express` gestures (eye roll, hat brim, hair flip,
+  twirl, villain rise…) are in `body/gestures.py`, clamped to the SDK ranges.
+- **Profile** `profiles/off_brand_reachy/profile.md` (`kind = "personas"`). The
+  live agent gets the session's cast as a dynamic variable, so changing the cast
+  never rebuilds the agent; tools `reachy_gesture`, `reachy_switch_persona`, `dance`.
+- **The Director** counts exchanges and tells the agent when to glitch into the
+  next persona (as a `[Director]` turn: live tests showed contextual updates alone
+  are ignored for this), switches after ~11 s of silence, and closes as Base Reachy
+  with the debrief line. "Reachy, reset", "that's not funny" or a discomfort cue
+  sends Reachy back to Base at once; a second discomfort cue drops every teasing persona.
+- Works offline too (scripted conversation): the same cast speaks its scripted lines.
+
 ## Facilitator UI
 
-- **Live**: stage strip with protocol countdown, Reachy's mode/act and *why*,
+- **Build session**: pick the script (Off-Brand Reachy, Beating in Sync, Gentle),
+  choose which personalities take part and their order (drag, arrows, add/remove;
+  Base Reachy always opens and closes), exchanges per persona, heartbeat wake-up
+  on/off, music on/off, no-teasing, and the hardware. Save it as a **preset**
+  (`presets/*.json`) to repeat a test condition exactly; four presets ship with the repo.
+  For Beating in Sync the personalities are the stage-4 persona moves (Flirty,
+  Teasing, Offended, Scolding).
+- **Personalities**: the catalog, filterable, with each persona's script and a
+  "Try a gesture" button that moves the robot.
+- **Live**: in persona sessions a strip shows the cast (done / now / next); click
+  a persona to jump to it, or use Next persona, Reset to Base, Close interview.
+  Also: stage strip with protocol countdown, Reachy's mode/act and *why*,
   heart chart (baseline band, stage bands, a dot per Reachy turn, ringed when
   the heart triggered it), both pulse sensors, conversation log with detected
   emotion and cues, what Reachy knows, and controls: Next stage, Scold now
@@ -140,7 +175,8 @@ every profile and can't be edited away.
   sincere goodbye, sleep). Participant lines can be typed (rehearsal / Wizard-of-Oz)
   or come from the microphone.
 - **Sessions**: replay with the moves the participant actually saw (for the
-  post-interview) and which reactions came from their heartbeat (for the debrief).
+  post-interview) and which reactions came from their heartbeat (for the debrief);
+  persona sessions list each persona with replies, laughs and peak BPM, and resets.
 - **Projection**: stage 7 — the heartbeat as colour and waves, full screen (F).
 
 ## Safety (from the protocol)

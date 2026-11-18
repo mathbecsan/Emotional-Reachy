@@ -1,0 +1,5 @@
+{
+  "name": "Off-Brand: quick demo",
+  "description": "Three contrasting personas, 3 exchanges each (about 4 minutes).",
+  "options": {"profile": "off_brand_reachy", "personas": ["base", "bored_teen", "hype_bro", "noir"], "switch_every": 3, "heart_wake": true, "music": false}
+}

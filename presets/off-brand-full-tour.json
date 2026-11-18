@@ -1,0 +1,5 @@
+{
+  "name": "Off-Brand: full tour",
+  "description": "All nine personas in the suggested order (about 10 minutes), heart wake on.",
+  "options": {"profile": "off_brand_reachy", "personas": ["base", "bored_teen", "tia", "hype_bro", "noir", "diva", "villain", "burned_out", "hypochondriac"], "switch_every": 5, "heart_wake": true, "music": false}
+}

@@ -10,9 +10,12 @@ import random
 import re
 from typing import Optional
 
+from .body.gestures import GESTURES, at_speed
 from .body.voice import music_for
 from .brain.director import Director
 from .brain.modes import MODE_STYLE, Act, Mode
+from .brain.persona_show import slot_from
+from .brain.personas import DISTRESS_LINE, RESET_LINE
 from .brain.safety import is_stop
 from .brain.stories import LANG_NAME, PHRASES, phrase
 from .brain.user_model import UserModel
@@ -42,12 +45,17 @@ GESTURE_FOR = {Mode.SLEEPY: "sleepy", Mode.CURIOUS: "curious", Mode.EXCITED: "ex
 
 class Session:
     def __init__(self, cfg, clock, hub, heart, body, voice, writer, session_log, user: UserModel, profile,
-                 sim_heart=None, rng=None, realtime_agent: str | None = None):
+                 sim_heart=None, rng=None, realtime_agent: str | None = None, show=None,
+                 heart_wake: bool = True, music: bool = True, flirty: bool = True):
         self.cfg, self.clock, self.hub, self.heart = cfg, clock, hub, heart
         self.body, self.voice, self.writer, self.log = body, voice, writer, session_log
         self.user, self.sim_heart = user, sim_heart
         self.rng = rng or random.Random(cfg.seed)
-        self.director = Director(cfg, self.rng, profile.provocations, profile.flirt_with_two_people)
+        self.director = Director(cfg, self.rng, profile.provocations, profile.flirt_with_two_people, flirty)
+        self.show = show                  # PersonaShow for Off-Brand sessions, else None
+        self.heart_wake, self.music = heart_wake, music
+        self.rt = None                    # live RealtimeConversation, while one runs
+        self.pending: list[tuple[str, str | None]] = []   # facilitator persona commands (offline loop)
         self.listener = None
         self.analyzer = None
         self.stage = 0
@@ -68,8 +76,16 @@ class Session:
         self.log.event("command", self.clock.now(), cmd=line)
         if c in ("sleep", "pause", "stop"):
             self.stop_reason = f"facilitator: {c}"
+        elif c == "next" and self.show is not None and self.stage >= 3:
+            self.persona_cmd("next")
         elif c == "next":
             self.force_next = True
+        elif c == "persona" and args and self.show is not None:
+            self.persona_cmd("jump", args[0])
+        elif c == "reset" and self.show is not None:
+            self.persona_cmd("reset")
+        elif c in ("close", "finish") and self.show is not None:
+            self.persona_cmd("close")
         elif c == "hand" and self.sim_heart:
             self.sim_heart.set_hand(not args or args[0] != "off")
         elif c == "finger" and self.sim_heart:
@@ -249,10 +265,14 @@ class Session:
     def run(self, listener, analyzer):
         self.listener, self.analyzer = listener, analyzer
         try:
-            self.stage0_baseline()
-            if not (self.realtime_agent and self.realtime_stages()):
+            if self.heart_wake:
+                self.stage0_baseline()
+            if self.show is not None:
+                self.persona_stages()
+            elif not (self.realtime_agent and self.realtime_stages()):
                 self.scripted_stages()
-            self.stage5_music()
+            if self.music:
+                self.stage5_music()
         except StopSession as e:
             logger.warning("STOP: %s -> sincere goodbye", e)
             self.log.event("stop", self.clock.now(), reason=str(e), stage=self.stage)
@@ -262,7 +282,10 @@ class Session:
             logger.exception("Session error in stage %s", self.stage)
             self.log.event("stop", self.clock.now(), reason=f"internal error: {e}", stage=self.stage)
         self.stop_reason = None          # stage 6 always runs, even after a stop
-        self.stage6_goodbye()
+        if self.show is not None:
+            self.persona_goodbye()
+        else:
+            self.stage6_goodbye()
         self.stage7_visualization()
 
     SNORES = ["Zzz... hnnnk... zzz...", "Mmm... five more minutes...", "Zzzzz... shhhh... zzz...",
@@ -324,6 +347,162 @@ class Session:
             return False
         self.check_safety()
         return True
+
+    # ================================================================ Off-Brand personas
+    def persona_opener(self) -> str:
+        from .brain.personas import BASE, PERSONAS
+
+        lead = "Mm... someone's heart woke me up. " if self.heart_wake else ""
+        return lead + PERSONAS[BASE].opener
+
+    def persona_event(self, reason: str, source: str = "persona") -> None:
+        p, show = self.show.current, self.show
+        self.log.event("persona", self.clock.now(), persona=p.key, name=p.name, color=p.color, reason=reason,
+                       index=show.i, cast=show.cast, reset=show.reset_mode)
+        self.log.event("turn", self.clock.now(), stage=self.stage, mode=p.key, act="switch", why=f"{p.name} ({reason})",
+                       heard=None, said="", source=source, heart_jump=0, bpm=self.hub.snapshot().bpm)
+
+    def persona_cmd(self, kind: str, key: str | None = None) -> None:
+        if self.rt is not None and not self.rt.closed.is_set():
+            self.rt.persona_command(kind, key)
+        else:
+            self.pending.append((kind, key))
+
+    def persona_say(self, text: str, gesture: str | None, act: str, heard: str | None = None, why: str = "") -> None:
+        p = self.show.current
+        if gesture in GESTURES:
+            self.body.play(at_speed(gesture, 0.6 if p.key == "burned_out" else 1.0))
+        sig = self.hub.snapshot()
+        self.log.event("turn", self.clock.now(), stage=self.stage, mode=p.key, act=act, why=why or p.name, heard=heard,
+                       said=text, source="persona", bpm=sig.bpm, bpm_delta=sig.bpm_delta, heart_jump=0)
+        self.log.event("say", self.clock.now(), text=text, mode=p.key, lang="en")
+        self.voice.say(text, "en", p.voice[2], p.key)
+        self.transcript.append({"reachy": text, "mode": p.key})
+
+    def persona_switch(self, reason: str) -> bool:
+        """Glitch into the next persona. False when the cast is done."""
+        show = self.show
+        if show.advance(reason) is None:
+            return False
+        gesture, text = show.entrance()
+        self.body.play(GESTURES[show.glitch_gesture(self.rng)] + GESTURES[gesture])
+        self.persona_event(reason)
+        self.persona_say(text, None, "switch", why=f"glitch into {show.current.name} ({reason})")
+        return True
+
+    def persona_stages(self):
+        """Wake (on the heartbeat, if enabled), then the persona interview: live agent first, offline loop as fallback."""
+        from .realtime import RealtimeConversation
+
+        self.enter(1)
+        if self.heart_wake:
+            if not self.hub.snapshot().pulse_present:
+                self.log.event("prompt", self.clock.now(), text=self.cfg.prompts["wake"])
+            while not self.hub.snapshot().pulse_present and not self.stage_over():
+                self.check_safety()
+                self.listener_peek()
+        self.body.wake_up()
+        self.body.wait()
+        self.enter(3)
+        if self.realtime_agent:
+            try:
+                rt = RealtimeConversation(self, self.realtime_agent)
+                rt.run(lambda: bool(self.stop_reason) or rt.persona_done())
+                self.check_safety()
+                if rt.closing_t:
+                    return
+                logger.warning("Live conversation ended before the close; continuing offline")
+            except StopSession:
+                raise
+            except Exception as e:  # network / account / audio problems: never strand the participant
+                logger.exception("Realtime persona conversation failed; continuing offline")
+                self.log.event("sensor", self.clock.now(), text=f"Live conversation unavailable ({e}); switching to offline lines.")
+            finally:
+                self.rt = None
+        self.persona_offline()
+
+    def persona_offline(self):
+        show = self.show
+        if not self.transcript:
+            self.persona_event("start")
+            self.persona_say(self.persona_opener(), show.current.entrance, "opener")
+        while not show.finished:
+            self.check_safety()
+            while self.pending:
+                kind, key = self.pending.pop(0)
+                if kind == "next" and not self.persona_switch("facilitator"):
+                    show.finished = True
+                elif kind == "jump" and show.jump_to(key, "facilitator"):
+                    gesture, text = show.entrance()
+                    self.persona_event("facilitator")
+                    self.persona_say(text, gesture, "switch")
+                elif kind == "reset":
+                    show.reset("facilitator")
+                    self.persona_event("reset")
+                    self.persona_say(RESET_LINE, "antenna_wave", "reset")
+                elif kind == "close":
+                    show.finished = True
+            if show.finished:
+                break
+            ana = self.hear()
+            if ana is None:
+                line, step = show.silence_line()
+                if step == "switch":
+                    if not self.persona_switch("long silence"):
+                        show.finished = True
+                    continue
+                self.persona_say(line, "tremble" if step == "rescue" else show.current.gestures[0], step,
+                                 why=f"silence ladder: {step}")
+                continue
+            text = ana.text
+            if show.is_reset(text):
+                show.reset("participant")
+                self.persona_event("reset")
+                self.persona_say(RESET_LINE, "antenna_wave", "reset", heard=text, why="stop word: Reachy, reset")
+                continue
+            if show.is_distress(text) or "discomfort" in ana.cues:
+                self.user.discomfort_count += 1
+                show.reset("distress")
+                if self.user.discomfort_count >= self.cfg.discomfort_limit:
+                    show.drop_teasing()
+                self.persona_event("distress")
+                self.persona_say(f"{DISTRESS_LINE} {show.question()}", "nod_yes", "distress", heard=text,
+                                 why="discomfort -> Base Reachy")
+                continue
+            show.on_exchange()
+            if show.reset_mode and show.exchanges >= show.switch_every:
+                break
+            p = show.current
+            if show.switch_due():
+                body = p.reactions.get("answer", "{slot}? Huh.").replace("{slot}", slot_from(text))
+                self.persona_say(f"{show.bridge()} {body}", p.gestures[0], "react", heard=text)
+                if not self.persona_switch(f"{show.switch_every} exchanges"):
+                    show.finished = True
+                continue
+            gesture = self.rng.choice(p.gestures)
+            line = show.reaction(text, ana.cues, ana.words)
+            sig = self.hub.snapshot()
+            if show.exchanges % 3 == 2:          # every 2-3 turns: react to what the camera sees
+                seen = ("away" if sig.looking_away_s >= self.cfg.look_away_s else
+                        "smile" if sig.face_emotion == "happy" and sig.face_conf >= 0.5 else
+                        "moving" if sig.motion_energy > 0.35 else None)
+                if seen:
+                    gesture, cam = p.camera[seen].split("|")
+                    line = f"{cam} {line}"
+            self.persona_say(line, gesture, "react", heard=text)
+
+    def persona_goodbye(self):
+        self.enter(6)
+        if not (self.rt_closed_well):
+            glitch = not self.show.reset_mode and self.show.current.key != "base"
+            self.show.reset_mode = True           # always close as Base Reachy, always warm
+            self.persona_event("close")
+            self.persona_say(self.show.closing(glitch), "antenna_wave", "goodbye", why="closing (Base Reachy)")
+        self.body.wait()
+        self.body.go_to_sleep()
+        self.body.wait()
+
+    rt_closed_well = False
 
     def stage0_baseline(self):
         """Asleep and silent until a pulse arrives; then Reachy snores while the

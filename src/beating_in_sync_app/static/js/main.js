@@ -3,6 +3,9 @@ import { connect, onConnection } from "./api.js";
 import { liveView } from "./views/live.js";
 import { sessionsView, replayView } from "./views/sessions.js";
 import { projectionView } from "./views/projection.js";
+import { builderView } from "./views/builder.js";
+import { personasView } from "./views/personas.js";
+import { loadPersonas } from "./personas.js";
 
 const outlet = document.getElementById("view-outlet");
 let cleanup = null;
@@ -16,6 +19,8 @@ function route() {
   if (view === "sessions" && arg) cleanup = replayView(outlet, decodeURIComponent(arg));
   else if (view === "sessions") cleanup = sessionsView(outlet);
   else if (view === "projection") cleanup = projectionView(outlet, arg && decodeURIComponent(arg));
+  else if (view === "build") cleanup = builderView(outlet, arg && decodeURIComponent(arg));
+  else if (view === "personas") cleanup = personasView(outlet, arg && decodeURIComponent(arg));
   else cleanup = liveView(outlet);
 }
 
@@ -27,4 +32,4 @@ onConnection((ok) => {
 
 window.addEventListener("hashchange", route);
 connect();
-route();
+loadPersonas().catch(() => {}).finally(route);   // persona colors before the first view renders

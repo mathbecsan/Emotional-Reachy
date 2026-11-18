@@ -75,7 +75,9 @@ class ElevenLabsVoice(MacVoice):
 
     def say(self, text, lang="en", rate=1.0, mode=""):
         logger.info("REACHY (%s, %s)> %s", mode, lang, text)
-        stability, style = MODE_VOICE.get(mode, (0.5, 0.3))
+        from .brain.personas import PERSONAS
+
+        stability, style = PERSONAS[mode].voice[:2] if mode in PERSONAS else MODE_VOICE.get(mode, (0.5, 0.3))
         body = {"text": text, "model_id": TTS_MODEL,
                 "voice_settings": {"stability": stability, "similarity_boost": 0.8, "style": style,
                                    "speed": max(0.7, min(1.2, rate))}}

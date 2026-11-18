@@ -62,8 +62,9 @@ class DirectorNote:
 
 class Director:
     def __init__(self, cfg: Config, rng: random.Random, provocations=("teasing", "offended", "scolding"),
-                 flirt_with_two_people: bool = True):
+                 flirt_with_two_people: bool = True, flirty: bool = True):
         self.cfg, self.rng = cfg, rng
+        self.flirty_allowed = flirty     # facilitators can leave Flirty out of a session
         self.allowed_provocations = {Mode(p) for p in provocations}
         self.flirt_with_two_people = flirt_with_two_people
         self.mode_history: list[Mode] = []
@@ -195,7 +196,7 @@ class Director:
             if (stage == 4 and mode in (Mode.CURIOUS, Mode.EXCITED) and not affect.negative and "discomfort" not in cues
                     and act != Act.ANSWER):
                 unused = [m for m in (Mode.TEASING, Mode.FLIRTY, Mode.SCOLDING)
-                          if m not in self.stage4_moves and (m == Mode.FLIRTY or m in self.allowed_provocations)]
+                          if m not in self.stage4_moves and ((m == Mode.FLIRTY and self.flirty_allowed) or m in self.allowed_provocations)]
                 if unused:
                     mode = unused[0]
                     act = Act.CHALLENGE if mode in PROVOCATIONS else Act.REACT
@@ -211,7 +212,8 @@ class Director:
             reason += " | 2 provocations in a row -> warm"
             mode = self._warm_for(affect, user)
             act = Act.REACT if act == Act.CHALLENGE else act
-        if mode == Mode.FLIRTY and (user.no_tease or user.discomfort_count >= self.cfg.discomfort_limit):
+        if mode == Mode.FLIRTY and (user.no_tease or not self.flirty_allowed
+                                    or user.discomfort_count >= self.cfg.discomfort_limit):
             mode = Mode.CURIOUS
 
         # ---- turn-taking: don't interrogate -----------------------------------

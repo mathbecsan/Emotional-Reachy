@@ -5,7 +5,12 @@ export function h(tag, attrs = {}, ...children) {
     if (v == null || v === false) continue;
     if (k.startsWith("on") && typeof v === "function") el.addEventListener(k.slice(2), v);
     else if (k === "class") el.className = v;
-    else if (k === "style" && typeof v === "object") Object.assign(el.style, v);
+    else if (k === "style" && typeof v === "object") {
+      for (const [prop, val] of Object.entries(v)) {
+        if (prop.startsWith("--")) el.style.setProperty(prop, val);   // custom properties need setProperty
+        else el.style[prop] = val;
+      }
+    }
     else if (k === "dataset") Object.assign(el.dataset, v);
     else el.setAttribute(k, v === true ? "" : v);
   }
