@@ -362,14 +362,17 @@ export function checkView(outlet, startKey) {
           setStep(ROUND.length);
           active = false;
           coach.querySelector(".coach__text").textContent = "Done!";
-          const bodyOk = !following || maxBody >= 40;
+          // The head leads by up to 35 deg, so the body only covers the rest: a person ~45-60 deg to the side
+          // needs ~10-25 deg of body turn. 15 deg proves the body joined in; below that it didn't really move.
+          const bodyOk = !following || maxBody >= 15;
           if (bodyOk) {
-            fb.set("pass", following ? `Reachy followed you, turning its body up to ${maxBody}°` : "Gaze and tracking work", following ? "" : "Connect Reachy to test the turning too.");
+            fb.set("pass", following ? `Reachy followed you all the way: head and body together (body turned up to ${maxBody}°)` : "Gaze and tracking work",
+              following ? "" : "Connect Reachy to test the turning too.");
             say("I followed you the whole way. Nice moves!");
             setResult("see", "pass");
           } else {
-            fb.set("fail", "Reachy's head followed you, but its body didn't turn", `The body turned only ${maxBody}°.`,
-              "The body motor may have stopped after an overload. Power-cycle Reachy (unplug its power for 10 seconds), then run Range of motion again.");
+            fb.set("fail", "Reachy's head followed you, but its body barely turned", `The body turned only ${maxBody}°, the head did the rest.`,
+              "Walk further to each side (past the edge of the picture) and run it again. If the body still doesn't move, run Range of motion: it measures the body motor.");
             setResult("see", "fail");
           }
         }
