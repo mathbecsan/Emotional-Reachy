@@ -14,6 +14,7 @@ import { personaStrip } from "../components/persona-strip.js";
 import { avatar } from "../components/avatar.js";
 import { setCrumbs } from "../ui.js";
 import { setupGate } from "../components/setup-gate.js";
+import { reconnectReachy } from "../components/reconnect.js";
 
 // Beating in Sync modes shown as the closest costume
 const MODE_COSTUME = { sleepy: "grumpy", curious: "base", excited: "hype_bro", flirty: "smitten", teasing: "bored_teen",
@@ -134,6 +135,15 @@ export function liveView(outlet) {
   const banner = h("div", { class: "banner", hidden: true });
   const status = h("p", { class: "live__status" }, "Waiting for a session");
   const sensorWarn = h("div", { class: "banner banner--warn", hidden: true, role: "alert" });
+  // Reachy's link lost during a session (robot software stopped or stuck): one press to get it back.
+  const robotWarn = h("div", { class: "banner banner--warn banner--ending", hidden: true, role: "alert" },
+    h("span", {}, "Reachy isn't connected, so it can't move. The conversation goes on. "),
+    h("button", { class: "btn btn--primary btn--small", type: "button", onclick: () => reconnectReachy() }, "↻ Reconnect Reachy"));
+  const onStatus = (ev) => {
+    const { check, state } = ev.detail || {};
+    robotWarn.hidden = !(state?.running && check && !(check.daemon?.ok && check.robot?.ok));
+  };
+  window.addEventListener("statuschange", onStatus);
   // Planned length reached: Reachy asks whether to keep going; the facilitator can decide too.
   const endingBar = h("div", { class: "banner banner--ending", hidden: true, role: "status" },
     h("span", {}, "⏳ Reachy is about to wrap up: the planned length is reached. It's asking the participant whether to keep talking. "),
@@ -158,6 +168,7 @@ export function liveView(outlet) {
     banner,
     sensorWarn,
     endingBar,
+    robotWarn,
     strip.el,
     h("div", { class: "live__cols" },
       h("div", { class: "live__left" },
@@ -332,5 +343,5 @@ export function liveView(outlet) {
   showStart();
   const off = onEvent(handle);
   api("/api/state").then((s) => handle({ kind: "snapshot", ...s })).catch(() => {});
-  return () => off();
+  return () => { off(); window.removeEventListener("statuschange", onStatus); };
 }

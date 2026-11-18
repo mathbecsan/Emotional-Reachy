@@ -135,11 +135,74 @@ def mount_routes(app: FastAPI, runner: SessionRunner, bus: EventBus, cfg: Config
     @app.post("/api/check/connect")
     async def check_connect() -> dict:
         idle()
+        fixed = await asyncio.to_thread(heal_daemon)
         try:
             await asyncio.to_thread(runner.connect_robot)
         except Exception as e:  # SDK raises several error types when the daemon is down
             return {"ok": False, "detail": "Couldn't connect", "fix": f"Turn the robot on in Reachy Mini Control first. ({e})"}
-        return {"ok": True, "detail": "Connected"}
+        return {"ok": True, "detail": "Connected" + (f" ({fixed})" if fixed else "")}
+
+    def heal_daemon(start_if_missing: bool = False) -> str:
+        """The robot software can be running but stuck in an error, e.g. "Motor communication error" after
+        the USB cable or hub was bumped: restart it once (its own restart endpoint), so Connect just works.
+        With start_if_missing, also start it when it isn't running at all."""
+        import urllib.request
+
+        from .repair import DAEMON, _daemon_status, start_daemon, stop_our_daemon
+
+        st = _daemon_status()
+        if not st and start_if_missing:
+            stop_our_daemon()
+            ok, msg = start_daemon(Path(cfg.sessions_dir))
+            return "started the robot software" if ok else f"couldn't start the robot software: {msg}"
+        state = (st or {}).get("state")
+        if not st or state not in ("error", "stopped") or (state == "stopped" and not start_if_missing):
+            return ""
+        action = "restart" if state == "error" else "start"
+        logger.warning("Robot software %s (%s): %sing it", state, st.get("error"), action)
+        try:
+            path = "restart" if action == "restart" else "start?wake_up=false"   # no surprise moves
+            urllib.request.urlopen(urllib.request.Request(f"{DAEMON}/api/daemon/{path}", method="POST"), timeout=30).read()
+        except OSError as e:
+            logger.warning("daemon restart failed: %s", e)
+            return ""
+        for _ in range(20):
+            time.sleep(1.5)
+            st = _daemon_status() or {}
+            if st.get("state") == "running":
+                return ("restarted the robot software after a motor communication error" if action == "restart"
+                        else "started the robot software")
+        return ""
+
+    reconnect_lock = asyncio.Lock()
+
+    @app.post("/api/robot/reconnect")
+    async def robot_reconnect() -> dict:
+        """One press to get Reachy back (top bar, setup step 1, session screen): restart the robot software
+        if it's stuck or not running, then reconnect this app, even during a session."""
+        from .repair import _daemon_status
+
+        if reconnect_lock.locked():
+            raise HTTPException(409, "Already reconnecting.")
+        async with reconnect_lock:
+            bus.emit("robot", status="reconnecting")
+            fixed = await asyncio.to_thread(heal_daemon, True)
+            st = await asyncio.to_thread(_daemon_status)
+            if not st or st.get("state") != "running":
+                detail = fixed or ((st or {}).get("error") or "The robot software isn't answering.")
+                bus.emit("robot", status="failed", detail=detail)
+                return {"ok": False, "detail": detail,
+                        "fix": "Check that Reachy is switched on and plugged in (power supply and USB cable), then press Reconnect again. "
+                               "If it still fails, run 🔧 Repair."}
+            try:
+                note = await asyncio.to_thread(runner.reconnect_robot)
+            except Exception as e:  # SDK raises several error types while the daemon settles
+                bus.emit("robot", status="failed", detail=str(e))
+                return {"ok": False, "detail": f"The robot software runs, but this app couldn't connect ({e}).",
+                        "fix": "Wait a few seconds and press Reconnect again."}
+            detail = "Reachy is connected" + (f" ({fixed})" if fixed else "") + "."
+            bus.emit("robot", status="connected", detail=detail)
+            return {"ok": True, "detail": detail, "note": note}
 
     @app.post("/api/check/move")
     async def check_move() -> dict:

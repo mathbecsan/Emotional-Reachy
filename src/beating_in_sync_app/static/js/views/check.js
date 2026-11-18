@@ -9,6 +9,7 @@ import { api, onEvent } from "../api.js";
 import { avatar } from "../components/avatar.js";
 import { speak, quiet, shortFix, praise, voiceOn, setVoice } from "../components/voice-guide.js";
 
+import { reconnectReachy } from "../components/reconnect.js";
 const STEPS = [
   { key: "reachy", intro: "Let's make sure I can move. Press Connect Reachy and watch me.", title: "Connect Reachy", costume: "base", color: "#5cc8ff", why: "This app needs to reach the robot, and every motor must respond." },
   { key: "sensors", intro: "Four quick checks: sensor 1 alone, sensor 2 alone, one finger on each, and two different people.", title: "Pulse sensors", costume: "smitten", color: "#ff5a6e", why: "The heartbeat wakes Reachy up and shapes its reactions." },
@@ -179,7 +180,14 @@ export function checkView(outlet, startKey) {
           if (!r.ok) { fb.set("fail", "Couldn't reach Reachy", "The robot software isn't running or the USB cable is unplugged.", "Open Reachy Mini Control and turn the robot on, then press Connect again."); setResult("reachy", "fail"); return; }
           await test();
         }),
-        busyBtn("Test the motors", test, false)), slot);
+        busyBtn("Test the motors", test, false),
+        busyBtn("↻ Reconnect Reachy", async () => {
+          fb.set("wait", "Restarting the robot software and reconnecting…", "This can take up to 20 seconds.");
+          const r = await reconnectReachy();
+          await fill();
+          if (r.ok) await test();
+          else { fb.set("fail", "Couldn't reconnect Reachy", r.detail, r.fix); setResult("reachy", "fail"); }
+        }, false)), slot);
       if (results.reachy === "pass") fb.set("pass", "Reachy is connected", "Passed earlier. Test again any time.");
       fill().catch((e) => fb.set("fail", "Couldn't check the robot", e.message));
     },

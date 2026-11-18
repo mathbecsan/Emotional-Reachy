@@ -244,6 +244,35 @@ class SessionRunner:
         self.robot = ReachyMini(media_backend="no_media", **({"robot_name": robot_name} if robot_name else {}))
         logger.info("Connected to Reachy Mini")
 
+    def reconnect_robot(self) -> str:
+        """Reconnect to Reachy at any time, even during a session: the running session's body switches
+        to the new link, so Reachy keeps moving after the robot software was restarted."""
+        from reachy_mini import ReachyMini
+
+        old = self.robot
+        self.robot, self._preview_body = ReachyMini(media_backend="no_media"), None
+        logger.info("Reconnected to Reachy Mini")
+        note = ""
+        if self.running and self.session is not None:
+            body = self.session.body
+            if isinstance(body, ReachyMiniBody):
+                body.robot = self.robot
+                try:
+                    self.robot.enable_motors()
+                except Exception as e:  # daemon still settling: the motion loop retries every tick
+                    logger.warning("enable_motors after reconnect: %s", e)
+                note = "The running session uses the new connection."
+            else:
+                note = "This session started without Reachy, so it keeps running without movement; the next one will move."
+        if old is not None:          # closing a dead link can hang: do it in the background
+            def close_old() -> None:
+                try:
+                    old.client.disconnect()
+                except Exception as e:  # stale link: nothing to clean up
+                    logger.debug("old robot link: %s", e)
+            threading.Thread(target=close_old, daemon=True, name="old-robot-link").start()
+        return note
+
     def wait_preview(self) -> None:
         """Block until a test gesture (e.g. the setup nod) has finished playing."""
         body = getattr(self, "_preview_body", None)

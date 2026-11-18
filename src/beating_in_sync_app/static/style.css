@@ -833,3 +833,6 @@ body[data-view="title"] .shell__outlet, body[data-view="menu"] .shell__outlet { 
 .gate__list li[data-state="pass"] .setup__mark { color: var(--ok); }
 .gate__list li[data-state="fail"] .setup__mark { color: var(--danger); }
 .gate__actions { justify-content: flex-end; flex-wrap: wrap; }
+
+.pill--action { cursor: pointer; font: inherit; }
+.pill--action:hover { filter: brightness(1.2); }

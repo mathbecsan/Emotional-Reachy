@@ -45,7 +45,7 @@ def quick(runner) -> dict:
         err = st.get("error")
         out["daemon"] = {"ok": not err and st.get("state") == "running",
                          "detail": err or f"Running ({st.get('state')})",
-                         "fix": "Restart the robot in Reachy Mini Control." if err else ""}
+                         "fix": "Press Connect Reachy: it restarts the robot software by itself. If it fails again, check the robot's power supply and its USB cable or hub." if err else ""}
     except (urllib.error.URLError, TimeoutError, OSError, json.JSONDecodeError):
         out["daemon"] = {"ok": False, "detail": "Not running",
                          "fix": "Open Reachy Mini Control and turn the robot on, then press Connect Reachy."}

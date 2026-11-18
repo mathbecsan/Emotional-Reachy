@@ -10,6 +10,7 @@ import { projectionView } from "./views/projection.js";
 import { personasView } from "./views/personas.js";
 import { loadPersonas } from "./personas.js";
 import { openRepair } from "./components/repair.js";
+import { reconnectReachy } from "./components/reconnect.js";
 
 const outlet = document.getElementById("view-outlet");
 const wipe = document.querySelector(".wipe");
@@ -59,13 +60,17 @@ async function refreshStatus() {
     const pill = (ok, label) => h("span", { class: `pill ${ok ? "pill--ok" : "pill--bad"}` }, h("i", { "aria-hidden": "true" }), label);
     statusEl.replaceChildren(...[
       st.running ? h("span", { class: "pill pill--live" }, h("i", { "aria-hidden": "true" }), "Session running") : null,
-      pill(c.daemon?.ok && c.robot?.ok, "Reachy"), pill(c.sensors?.ok, "Sensors"), pill(c.voice?.ok && c.audio?.ok, "Voice"),
+      c.daemon?.ok && c.robot?.ok ? pill(true, "Reachy")
+        : h("button", { type: "button", class: "pill pill--bad pill--action", title: `${c.daemon?.ok ? c.robot?.detail : c.daemon?.detail || "Reachy isn't connected"}. Click to reconnect.`,
+            onclick: (e) => { e.currentTarget.disabled = true; e.currentTarget.lastChild.textContent = "Reconnecting…"; reconnectReachy(); } },
+          h("i", { "aria-hidden": "true" }), "Reachy · Reconnect"),
+      pill(c.sensors?.ok, "Sensors"), pill(c.voice?.ok && c.audio?.ok, "Voice"),
     ].filter(Boolean));
     window.dispatchEvent(new CustomEvent("statuschange", { detail: { check: c, state: st } }));
   } catch { /* offline: the brand shows it */ }
 }
 onConnection((ok) => { document.body.classList.toggle("is-offline", !ok); if (ok) refreshStatus(); });
-onEvent((e) => { if (e.kind === "session") refreshStatus(); });
+onEvent((e) => { if (e.kind === "session" || (e.kind === "robot" && e.status !== "reconnecting")) refreshStatus(); });
 window.addEventListener("refreshstatus", refreshStatus);
 setInterval(refreshStatus, 15000);
 
