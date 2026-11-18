@@ -368,8 +368,11 @@ class TrackProbe(threading.Thread):
             return
         front = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
         side = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_profileface.xml")
+        clahe = cv2.createCLAHE(clipLimit=2.5, tileGridSize=(8, 8))
         look = body = pitch = 0.0          # where Reachy looks / where its body points (deg, + = Reachy's left)
         last_dir, lost_since = 0.0, None
+        recent: list[bool] = []            # face seen in the last frames: a track needs 3 of the last 5
+        confirmed_at, last_seen_look = None, 0.0
         t0, seen_front, seen_away, moved = time.monotonic(), 0, 0, 0.0
         last_x = None
         np_ = __import__("numpy")
@@ -385,12 +388,13 @@ class TrackProbe(threading.Thread):
                     continue
                 h_, w_ = frame.shape[:2]
                 gray = cv2.cvtColor(cv2.resize(frame, (w_ // 2, h_ // 2)), cv2.COLOR_BGR2GRAY)
-                faces = front.detectMultiScale(gray, 1.2, 5, minSize=(40, 40))
+                gray = clahe.apply(gray)              # even out dim, uneven room light before looking for faces
+                faces = front.detectMultiScale(gray, 1.15, 6, minSize=(48, 48))
                 facing = len(faces) > 0
                 if not facing:
-                    faces = side.detectMultiScale(gray, 1.2, 5, minSize=(40, 40))
+                    faces = side.detectMultiScale(gray, 1.15, 6, minSize=(48, 48))
                     if not len(faces):        # profile facing the other way: detect on the mirror, map back
-                        flipped = side.detectMultiScale(cv2.flip(gray, 1), 1.2, 5, minSize=(40, 40))
+                        flipped = side.detectMultiScale(cv2.flip(gray, 1), 1.15, 6, minSize=(48, 48))
                         faces = [(gray.shape[1] - x - fw, y, fw, fh) for (x, y, fw, fh) in flipped]
                 preview = cv2.resize(frame, (480, int(480 * h_ / w_)))
                 if len(faces):
@@ -401,8 +405,11 @@ class TrackProbe(threading.Thread):
                 self.jpeg = cv2.imencode(".jpg", preview, [cv2.IMWRITE_JPEG_QUALITY, 65])[1].tobytes()
                 now = time.monotonic()
                 searching = False
-                if len(faces):
+                recent = (recent + [bool(len(faces))])[-5:]
+                tracked = sum(recent) >= 3          # a single-frame (false) detection never moves Reachy
+                if len(faces) and tracked:
                     lost_since = None
+                    confirmed_at = now
                     fx = (x + fw / 2) / (w_ / 2) * 2 - 1
                     fy = (y + fh / 2) / (h_ / 2) * 2 - 1
                     if last_x is not None:
@@ -414,13 +421,23 @@ class TrackProbe(threading.Thread):
                     look = max(-160.0, min(160.0, look + step))
                     if abs(step) > 1:
                         last_dir = 1.0 if step > 0 else -1.0
+                    last_seen_look = look
                     pitch = max(-20.0, min(20.0, pitch + fy * 3))
-                else:
-                    # Lost them: they probably walked out of view, so keep turning the way they went.
+                elif not len(faces):
                     lost_since = lost_since or now
-                    if last_dir and now - lost_since < 6 and abs(look) < 150:
+                    gone = now - lost_since
+                    # Search only right after a confirmed track was lost: they probably walked out of view.
+                    # Keep turning their way for up to 70 deg past where they were last seen, then ease back.
+                    if confirmed_at and now - confirmed_at < 6 and last_dir and abs(look - last_seen_look) < 70 and abs(look) < 150:
                         look = max(-155.0, min(155.0, look + last_dir * 4))
                         searching = True
+                    elif gone > 8:                       # nobody for a while: settle back to the middle
+                        look *= 0.97
+                        body *= 0.97
+                        pitch *= 0.9
+                if len(faces) and not tracked:           # seen, but not confirmed yet: report, don't move
+                    fx = (x + fw / 2) / (w_ / 2) * 2 - 1
+                    fy = (y + fh / 2) / (h_ / 2) * 2 - 1
                 # The body follows once the head is more than 25 deg off it; the head never gets more than
                 # 40 deg from the body (body/coordination.py), so Reachy can't jam against itself.
                 gap = look - body
@@ -434,7 +451,7 @@ class TrackProbe(threading.Thread):
                         logger.debug("follow failed: %s", e)
                         self.robot = None
                 left = round(self.seconds - (now - t0))
-                if len(faces):
+                if len(faces) and tracked:
                     # Where the person stands, in degrees from Reachy's front (+ = the person's left).
                     # Following recentres the face in the picture, so add Reachy's own turn back in.
                     angle = fx * 30 - (look if self.robot is not None else 0.0)
