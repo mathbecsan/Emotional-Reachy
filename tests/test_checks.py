@@ -81,3 +81,16 @@ def test_live_session_reacts_to_a_performance():
     assert "just performed" in sent[-1]
     rc._on_sound("clapping")
     assert "clapping" in sent[-1]
+
+
+def test_head_never_strays_far_from_the_body():
+    from beating_in_sync_app.body.coordination import MAX_RELATIVE_YAW, coordinate, turn_steps
+
+    yaw, body, pitch, roll = coordinate(yaw=0, body=150, pitch=30, roll=20, body_delta=150)
+    assert body == 150 and abs(yaw - body) <= MAX_RELATIVE_YAW        # head turns with the body
+    assert abs(pitch) <= 10 and abs(roll) <= 10                        # level head during a big turn
+    assert coordinate(yaw=90, body=0)[0] == MAX_RELATIVE_YAW           # head alone can't twist past the limit
+    steps = turn_steps(0, 150)
+    assert len(steps) == 3 and steps[-1] == (150, 150)
+    assert all(abs(y - b) <= MAX_RELATIVE_YAW for y, b in steps)
+    assert all(abs(b2 - b1) <= 50 for (_, b1), (_, b2) in zip([(0, 0)] + steps, steps))

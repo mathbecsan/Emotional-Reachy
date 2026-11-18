@@ -40,13 +40,13 @@ KEYFRAMES_FIRST = {"flirty", "offended", "scolding", "wake", "to_sleep", "listen
 
 def styled(seq, intensity: float = 1.0, speed: float = 1.0) -> list:
     """Scale a keyframe sequence: intensity = size of the motion (0.3-1.3), speed = tempo (0.5-1.5).
-    Head yaw stays within 60 deg of the body and the body within +-160 (SDK limits)."""
+    Head yaw stays within 40 deg of the body (body/coordination.py) and the body within +-160."""
     if intensity == 1.0 and speed == 1.0:
         return list(seq)
     out = []
     for p in seq:
         body = max(-160.0, min(160.0, p.body_yaw * intensity))
-        yaw = max(body - 60.0, min(body + 60.0, p.yaw * intensity))
+        yaw = max(body - 40.0, min(body + 40.0, p.yaw * intensity))   # body/coordination.py
         out.append(Pose(p.roll * intensity, p.pitch * intensity, yaw, p.z * intensity, p.x * intensity,
                         (p.ant[0] * intensity, p.ant[1] * intensity), body, max(0.08, p.dur / speed)))
     return out
@@ -177,11 +177,25 @@ class ReachyMiniBody(BaseBody):
         except (RuntimeError, ConnectionError, ValueError) as e:
             logger.warning("set_target failed: %s", e)
 
+    _body = 0.0   # last body yaw we commanded (deg)
+
     def _goto(self, p: Pose) -> None:
+        """Send one keyframe, coordinated so the head travels with the body (body/coordination.py):
+        big body turns are split into steps, the head stays within 40 deg of the body."""
+        from .coordination import coordinate, turn_steps
+
         np = self.np
-        head = self.create_head_pose(x=p.x, z=p.z, roll=p.roll, pitch=p.pitch, yaw=p.yaw, mm=True, degrees=True)
-        self.robot.goto_target(head=head, antennas=np.deg2rad(list(p.ant)), body_yaw=np.deg2rad(p.body_yaw),
-                               duration=p.dur)
+        delta = p.body_yaw - self._body
+        if abs(delta) > 50:                       # big turn: head and body travel together in steps
+            steps = turn_steps(self._body, p.body_yaw, head_offset=max(-40.0, min(40.0, p.yaw - p.body_yaw)))
+            for yaw, body in steps[:-1]:
+                head = self.create_head_pose(z=p.z, yaw=yaw, mm=True, degrees=True)
+                self.robot.goto_target(head=head, body_yaw=np.deg2rad(body), duration=max(0.3, p.dur / len(steps)))
+        yaw, body, pitch, roll = coordinate(p.yaw, p.body_yaw, p.pitch, p.roll, delta)
+        head = self.create_head_pose(x=p.x, z=p.z, roll=roll, pitch=pitch, yaw=yaw, mm=True, degrees=True)
+        self.robot.goto_target(head=head, antennas=np.deg2rad(list(p.ant)), body_yaw=np.deg2rad(body),
+                               duration=p.dur if abs(delta) <= 50 else max(0.3, p.dur / max(1, int(abs(delta) // 50) + 1)))
+        self._body = body
 
     def wake_up(self) -> None:
         self._stop.set()

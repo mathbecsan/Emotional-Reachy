@@ -109,7 +109,7 @@ EXPRESS_GESTURES = list(_EXPRESS)
 
 def _pose(k) -> Pose:
     sec, x, z, roll, pitch, yaw, ant_r, ant_l, body = k
-    yaw = max(body - 60.0, min(body + 60.0, yaw))
+    yaw = max(body - 40.0, min(body + 40.0, yaw))      # head within 40 deg of the body (body/coordination.py)
     return Pose(roll=roll, pitch=pitch, yaw=yaw, z=z, x=x, ant=(-ant_r, -ant_l),
                 body_yaw=max(-160.0, min(160.0, body)), dur=max(0.08, sec))
 

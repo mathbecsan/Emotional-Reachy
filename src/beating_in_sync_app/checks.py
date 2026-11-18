@@ -421,11 +421,12 @@ class TrackProbe(threading.Thread):
                     if last_dir and now - lost_since < 6 and abs(look) < 150:
                         look = max(-155.0, min(155.0, look + last_dir * 4))
                         searching = True
-                # The body follows once the head is more than 30 deg off it; the head stays within 45 deg of the body.
+                # The body follows once the head is more than 25 deg off it; the head never gets more than
+                # 40 deg from the body (body/coordination.py), so Reachy can't jam against itself.
                 gap = look - body
-                if abs(gap) > 30:
-                    body = max(-150.0, min(150.0, body + max(-5.0, min(5.0, gap - (25 if gap > 0 else -25)))))
-                look = max(body - 45, min(body + 45, look))
+                if abs(gap) > 25:
+                    body = max(-150.0, min(150.0, body + max(-5.0, min(5.0, gap - (20 if gap > 0 else -20)))))
+                look = max(body - 40, min(body + 40, look))
                 if self.robot is not None and create_head_pose is not None:
                     try:
                         self.robot.set_target(head=create_head_pose(yaw=look, pitch=pitch, degrees=True), body_yaw=float(np_.deg2rad(body)))
@@ -484,7 +485,7 @@ MOVES = [
     ("lean_back", "Lean back", "Height & lean", _seq(dict(x=-15, pitch=-10))),
     ("turn_left", "Turn the body left (150°)", "Body", _seq(dict(body=75, yaw=75), dict(body=150, yaw=150), dur=1.6)),
     ("turn_right", "Turn the body right (150°)", "Body", _seq(dict(body=-75, yaw=-75), dict(body=-150, yaw=-150), dur=1.6)),
-    ("over_shoulder", "Look over the shoulder", "Body", _seq(dict(body=90, yaw=140), dur=2.0)),
+    ("over_shoulder", "Look over the shoulder", "Body", _seq(dict(body=100, yaw=140), dur=2.4)),
     ("ant_one", "Both antennas one way", "Antennas", _seq(dict(ant=(-60, -60)))),
     ("ant_other", "Both antennas the other way", "Antennas", _seq(dict(ant=(60, 60)))),
     ("ant_left", "Left antenna only", "Antennas", _seq(dict(ant=(0, -60)))),
@@ -509,11 +510,28 @@ def mobility(robot, bus, group: str | None = None) -> dict:
         j, _ = robot.get_current_joint_positions()
         return float(np.rad2deg(j[0]))
 
+    def head_yaw_now():
+        m = np.asarray(robot.get_current_head_pose())
+        return float(np.rad2deg(np.arctan2(m[1, 0], m[0, 0])))
+
+    measured = {}
+    from .body.coordination import coordinate, turn_steps
+
+    state = {"body": 0.0}
+
     def go(p, dur):
-        head = create_head_pose(x=p.get("x", 0), z=p.get("z", 0), roll=p.get("roll", 0), pitch=p.get("pitch", 0),
-                                yaw=p.get("yaw", 0), mm=True, degrees=True)
-        robot.goto_target(head=head, antennas=np.deg2rad(list(p.get("ant", (0, 0)))), body_yaw=np.deg2rad(p.get("body", 0)),
-                          duration=dur)
+        """Coordinated move: big body turns go in steps with the head travelling along."""
+        target_body = p.get("body", 0.0)
+        delta = target_body - state["body"]
+        if abs(delta) > 50:
+            steps = turn_steps(state["body"], target_body, head_offset=max(-40.0, min(40.0, p.get("yaw", 0.0) - target_body)))
+            for yaw, body in steps[:-1]:
+                robot.goto_target(head=create_head_pose(yaw=yaw, degrees=True), body_yaw=np.deg2rad(body), duration=dur / len(steps))
+            dur = dur / len(steps)
+        yaw, body, pitch, roll = coordinate(p.get("yaw", 0.0), target_body, p.get("pitch", 0.0), p.get("roll", 0.0), delta)
+        head = create_head_pose(x=p.get("x", 0), z=p.get("z", 0), roll=roll, pitch=pitch, yaw=yaw, mm=True, degrees=True)
+        robot.goto_target(head=head, antennas=np.deg2rad(list(p.get("ant", (0, 0)))), body_yaw=np.deg2rad(body), duration=dur)
+        state["body"] = body
 
     try:
         for key, label, grp, seq in moves:
@@ -521,6 +539,9 @@ def mobility(robot, bus, group: str | None = None) -> dict:
             start = body_now()
             for pose, dur in seq:
                 go(pose, dur)
+            time.sleep(0.15)
+            measured[key] = {"head_yaw": round(head_yaw_now()), "body": round(body_now()),
+                             "target_yaw": seq[-1][0].get("yaw", 0), "target_body": seq[-1][0].get("body", 0)}
             turned = None
             if any("body" in p for p, _ in seq):
                 time.sleep(0.2)
@@ -528,7 +549,7 @@ def mobility(robot, bus, group: str | None = None) -> dict:
                 turned = body_now() - start
                 if abs(turned) < abs(target) * 0.4 or (target and turned * target < 0):
                     body_issue = (key, round(turned))
-            go({}, 2.0 if turned is not None else 0.6)
+            go({}, 3.0 if turned is not None else 0.6)
             if turned is not None and body_issue and body_issue[0] == key:
                 bus.emit("mobility", step=key, label=label, group=grp, status="failed", measured=round(turned))
                 continue
@@ -536,13 +557,13 @@ def mobility(robot, bus, group: str | None = None) -> dict:
             bus.emit("mobility", step=key, label=label, group=grp, status="done", measured=None if turned is None else round(turned))
     except Exception as e:  # SDK errors when the daemon drops mid-test
         bus.emit("mobility", step=None, status="error")
-        return {"ok": False, "done": done, "detail": f"Stopped after {len(done)} of {len(moves)} moves",
+        return {"ok": False, "done": done, "measured": measured, "detail": f"Stopped after {len(done)} of {len(moves)} moves",
                 "fix": f"Check that nothing blocks Reachy and that it's on in Reachy Mini Control. ({e})"}
     if body_issue:
-        return {"ok": False, "done": done, "body_stuck": True,
+        return {"ok": False, "done": done, "body_stuck": True, "measured": measured,
                 "detail": f"The body didn't turn (it moved {body_issue[1]}° instead of about 150°). The head moves, the body motor doesn't.",
                 "fix": BODY_FIX}
-    return {"ok": True, "done": done, "detail": f"All {len(done)} moves played"}
+    return {"ok": True, "done": done, "measured": measured, "detail": f"All {len(done)} moves played"}
 
 
 BODY_FIX = ("The body motor isn't turning. It usually stops itself after an overload (when the base is blocked). "
