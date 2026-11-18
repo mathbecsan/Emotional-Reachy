@@ -94,3 +94,21 @@ def test_head_never_strays_far_from_the_body():
     assert len(steps) == 3 and steps[-1] == (150, 150)
     assert all(abs(y - b) <= MAX_RELATIVE_YAW for y, b in steps)
     assert all(abs(b2 - b1) <= 50 for (_, b1), (_, b2) in zip([(0, 0)] + steps, steps))
+
+
+def test_repair_stops_when_a_session_runs_and_finds_reachys_port(monkeypatch):
+    import types
+
+    import beating_in_sync_app.repair as repair
+
+    events = []
+    bus = types.SimpleNamespace(emit=lambda kind, **k: events.append(k))
+    runner = types.SimpleNamespace(running=True)
+    out = repair.Repair(runner, bus, types.SimpleNamespace(sessions_dir="/tmp"), lambda: []).run()
+    assert not out["ok"] and out["results"][0]["step"] == "session" and "End the session" in out["results"][0]["fix"]
+    assert events[-1]["done"]
+    monkeypatch.setattr(repair, "list_ports", lambda: [
+        {"device": "/dev/cu.usbserial-A1", "description": "FT232R USB UART", "busy": False},
+        {"device": "/dev/cu.usbmodemSN1", "description": "USB BillBoard", "busy": False},
+        {"device": "/dev/cu.usbmodem5B7B", "description": "USB Single Serial", "busy": True}])
+    assert repair.reachy_port() == "/dev/cu.usbmodem5B7B"

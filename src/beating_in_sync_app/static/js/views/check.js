@@ -73,7 +73,8 @@ export function checkView(outlet, startKey) {
         box.hidden = false;
         box.dataset.state = state;
         box.replaceChildren(h("span", { class: "feedback__icon", "aria-hidden": "true" }, state === "pass" ? "✓" : state === "fail" ? "!" : "…"),
-          h("div", {}, h("strong", {}, title), meaning ? h("p", {}, meaning) : "", fix ? h("p", { class: "feedback__fix" }, h("b", {}, "Try this: "), fix) : ""));
+          h("div", {}, h("strong", {}, title), meaning ? h("p", {}, meaning) : "", fix ? h("p", { class: "feedback__fix" }, h("b", {}, "Try this: "), fix) : "",
+            state === "fail" ? h("button", { type: "button", class: "btn btn--small feedback__repair", onclick: () => window.dispatchEvent(new Event("repair")) }, "🔧 Repair automatically") : ""));
       },
     };
   }

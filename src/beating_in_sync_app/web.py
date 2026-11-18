@@ -197,6 +197,28 @@ def mount_routes(app: FastAPI, runner: SessionRunner, bus: EventBus, cfg: Config
         track["thread"].start()
         return {"ok": True, "following": robot is not None}
 
+    repair_lock = asyncio.Lock()
+
+    def stop_probes() -> list[str]:
+        stopped = []
+        for name, holder in (("sensor test", probe), ("camera test", track)):
+            t = holder["thread"]
+            if t is not None and t.is_alive():
+                t.stop_event.set()
+                t.join(timeout=5)
+                stopped.append(name)
+        return stopped
+
+    @app.post("/api/repair")
+    async def repair() -> dict:
+        """One-button repair (repair.py): stale link, leftover tests, daemon, motors, sleep/wake reset, checks."""
+        from .repair import Repair
+
+        if repair_lock.locked():
+            raise HTTPException(409, "A repair is already running.")
+        async with repair_lock:
+            return await asyncio.to_thread(Repair(runner, bus, cfg, stop_probes).run)
+
     @app.get("/api/check/cameras")
     async def cameras() -> dict:
         return {"current": cfg.camera_index, "names": await asyncio.to_thread(checks.camera_names), "indices": [0, 1, 2]}

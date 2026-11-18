@@ -133,6 +133,22 @@ Switch it off again before a participant sits down.
 
 ## When something goes wrong
 
+**First, press 🔧 Repair** (top right, on every page, or *Repair automatically* under any failed check).
+It takes about 30 seconds and works through the usual causes, showing each step:
+
+1. checks no session is running;
+2. stops leftover tests that still hold the robot, the Arduino or the camera;
+3. checks the robot software, and starts it (or restarts it if it's in an error state) when Reachy is plugged in;
+4. reconnects to Reachy with a fresh link (after the laptop sleeps, the old link can look connected but be dead);
+5. switches the motors on;
+6. puts Reachy to sleep and wakes it up, so it starts from its neutral pose;
+7. checks that the head and body move;
+8. checks the pulse sensors are plugged in and free;
+9. checks the voice service and Reachy's microphone and speaker.
+
+Anything it can't fix is shown in orange, with what to do. If it's all green, run the setup checklist again.
+
+
 | What you see | What to do |
 |---|---|
 | Reachy talks but doesn't move | The robot software stopped. Turn the robot on in **Reachy Mini Control**, then **Check setup → Connect Reachy**. |

@@ -770,3 +770,29 @@ body[data-view="title"] .shell__outlet, body[data-view="menu"] .shell__outlet { 
 .chatlog li b { font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); }
 .chatlog__reachy { align-self: flex-start; background: var(--panel-2); border-left: 3px solid var(--accent); }
 .chatlog__you { align-self: flex-end; background: #1f2430; }
+
+/* repair */
+.repair-btn { white-space: nowrap; }
+.repair { position: fixed; inset: 0; z-index: 40; background: rgba(5, 5, 8, 0.72); display: grid; place-items: center; padding: 16px; animation: fade-up 0.2s var(--ease-out); }
+.repair__card { width: min(640px, 100%); max-height: 90vh; overflow-y: auto; background: var(--panel); border: 1px solid var(--line); border-top: 5px solid var(--warn); border-radius: 20px; padding: 22px; display: flex; flex-direction: column; gap: 12px; }
+.repair__card h2 { margin: 0; font-family: var(--display); font-size: 24px; }
+.repair__card header p { margin: 4px 0 0; }
+.repair__list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.repair__row { display: grid; grid-template-columns: 26px 1fr; gap: 10px; align-items: start; padding: 8px 10px; border-radius: 12px; background: var(--panel-2); }
+.repair__row p { margin: 2px 0 0; font-size: 13px; }
+.repair__detail { color: var(--muted); }
+.repair__fix { color: var(--warn); }
+.repair__icon { width: 24px; height: 24px; border-radius: 50%; display: grid; place-items: center; border: 2px solid var(--line); font-size: 12px; font-weight: 900; }
+.repair__row[data-status="working"] .repair__icon { border-color: var(--warn); animation: blink 0.8s infinite; }
+.repair__row[data-status="ok"] .repair__icon, .repair__row[data-status="fixed"] .repair__icon { background: var(--ok); border-color: var(--ok); color: #0b0b10; }
+.repair__row[data-status="ok"] .repair__icon::after { content: "✓"; }
+.repair__row[data-status="fixed"] .repair__icon::after { content: "🔧"; font-size: 11px; }
+.repair__row[data-status="failed"] { outline: 1px solid rgba(255, 77, 77, 0.5); }
+.repair__row[data-status="failed"] .repair__icon { background: var(--danger); border-color: var(--danger); color: #fff; }
+.repair__row[data-status="failed"] .repair__icon::after { content: "!"; }
+.repair__row[data-status="pending"] { opacity: 0.55; }
+.repair__summary { margin: 4px 0 0; font-weight: 700; }
+.repair__summary[data-ok="true"] { color: var(--ok); }
+.repair__summary[data-ok="false"] { color: var(--warn); }
+.repair__nav { justify-content: flex-end; }
+.feedback__repair { margin-top: 8px; }

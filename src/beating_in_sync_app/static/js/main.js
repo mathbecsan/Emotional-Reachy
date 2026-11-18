@@ -9,6 +9,7 @@ import { sessionsView, replayView } from "./views/sessions.js";
 import { projectionView } from "./views/projection.js";
 import { personasView } from "./views/personas.js";
 import { loadPersonas } from "./personas.js";
+import { openRepair } from "./components/repair.js";
 
 const outlet = document.getElementById("view-outlet");
 const wipe = document.querySelector(".wipe");
@@ -67,6 +68,9 @@ onConnection((ok) => { document.body.classList.toggle("is-offline", !ok); if (ok
 onEvent((e) => { if (e.kind === "session") refreshStatus(); });
 window.addEventListener("refreshstatus", refreshStatus);
 setInterval(refreshStatus, 15000);
+
+document.querySelector("[data-component=repair]").addEventListener("click", openRepair);
+window.addEventListener("repair", openRepair);
 
 const dbg = document.querySelector("[data-component=debug]");
 dbg.checked = isDebug();
