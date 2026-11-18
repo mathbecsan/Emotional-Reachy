@@ -197,23 +197,6 @@ def mount_routes(app: FastAPI, runner: SessionRunner, bus: EventBus, cfg: Config
         track["thread"].start()
         return {"ok": True, "following": robot is not None}
 
-    @app.get("/api/check/track/stream")
-    async def track_stream():
-        """Live camera preview (MJPEG) while the camera test runs."""
-        from fastapi.responses import StreamingResponse
-
-        async def frames():
-            last = None
-            for _ in range(600):                     # ~60 s at most
-                t = track["thread"]
-                if t is None or not t.is_alive():
-                    break
-                if t.jpeg is not None and t.jpeg is not last:
-                    last = t.jpeg
-                    yield b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + last + b"\r\n"
-                await asyncio.sleep(0.1)
-        return StreamingResponse(frames(), media_type="multipart/x-mixed-replace; boundary=frame")
-
     @app.get("/api/check/cameras")
     async def cameras() -> dict:
         return {"current": cfg.camera_index, "names": await asyncio.to_thread(checks.camera_names), "indices": [0, 1, 2]}
@@ -252,10 +235,36 @@ def mount_routes(app: FastAPI, runner: SessionRunner, bus: EventBus, cfg: Config
         return {"ok": True}
 
     @app.post("/api/check/mobility")
-    async def check_mobility() -> dict:
+    async def check_mobility(body: dict | None = None) -> dict:
         idle()
         robot = runner.robot if runner.robot_ok() else None
-        return await asyncio.to_thread(checks.mobility, robot, bus)
+        return await asyncio.to_thread(checks.mobility, robot, bus, (body or {}).get("group"))
+
+    @app.get("/api/check/moves")
+    async def check_moves() -> list[dict]:
+        return [{"key": k, "label": label, "group": g} for k, label, g, _ in checks.MOVES]
+
+    @app.get("/api/check/track/frame.jpg")
+    async def track_frame():
+        """Latest camera frame while the camera test runs (polled: no long-lived connection)."""
+        from fastapi.responses import Response
+
+        t = track["thread"]
+        if t is None or t.jpeg is None:
+            raise HTTPException(404, "no frame yet")
+        return Response(t.jpeg, media_type="image/jpeg", headers={"Cache-Control": "no-store"})
+
+    say_lock = asyncio.Lock()
+
+    @app.post("/api/check/say")
+    async def check_say(body: dict) -> dict:
+        """Reachy speaks a short instruction during the setup (e.g. the Follow me game)."""
+        idle()
+        text = str(body.get("text", ""))[:200]
+        if not text or say_lock.locked():
+            return {"ok": False}
+        async with say_lock:
+            return await asyncio.to_thread(checks.speak, text)
 
     @app.get("/api/voices")
     async def list_voices() -> list[dict]:

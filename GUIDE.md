@@ -63,7 +63,8 @@ There are **three pieces**, and they start in this order:
 
 ### Setup checklist (before every participant)
 
-Seven short screens. The map on the left shows each step's result: **✓** passed, **!** needs fixing, **–** skipped.
+Seven short screens that **unlock in order**: pass a step (or press *Skip*) to open the next one.
+The map on the left shows each step's result: **✓** passed, **!** needs fixing, **–** skipped, 🔒 not yet unlocked.
 Every screen says what is being tested, gives feedback straight away, and, if
 something fails, explains what it means and what to try.
 
@@ -71,11 +72,11 @@ something fails, explains what it means and what to try.
 |---|---|---|
 | **1 Connect Reachy** | Press *Connect Reachy*, watch it nod, answer *Yes* | Reachy nods |
 | **2 Pulse sensors** | Rest a finger lightly on each sensor and keep still | A heart rate appears (about 5 s) |
-| **3 Camera & gaze** | Look at Reachy, turn your head away, look back | All three ticks appear |
-| **4 Microphone & sounds** | *Record speech* and say a sentence; *Record a sound* and clap or play a ringtone | Reachy writes out what you said (and names the sound) |
+| **3 Camera & gaze** | Watch yourself in the live picture; look at Reachy, turn your head away, look back. *Wrong camera?* shows each camera so you can pick Reachy's | All three ticks appear |
+| **4 Microphone & sounds** | *Record speech* and say a sentence; *Record a performance* and clap a rhythm, sing, or play music | Reachy writes out what you said **and** names the performance (clapping, music or singing) |
 | **5 Speaker** | *Play Reachy's voice*, answer whether you heard it clearly | You answer *Yes* |
-| **6 Follow me** | Move to one side, then the other, then back to the middle | Reachy turns to follow you |
-| **7 Range of motion** | Clear the space, press *Start the moves*, answer whether it looked smooth | You answer *Yes* |
+| **6 Follow me** | Press *Start the game*. Reachy tells you out loud where to go (in front, your left, your right, back to the middle); the banner and the map show it too | Reachy turns to follow you through all four positions |
+| **7 Range of motion** | Clear the space, press *Run every move* (or *Run* one group: head, expressions, height & lean, body, antennas) | You answer *Yes* after all 24 moves |
 
 The **Summary** lists what's still needed. Reachy, sensors, microphone and speaker must pass before a real session.
 
@@ -101,6 +102,9 @@ The **Summary** lists what's still needed. Reachy, sensors, microphone and speak
    **▶ Start session**. *Save setup* stores everything under a name, so each study condition is identical.
 
 ### Current session
+
+- **Performances:** if the participant claps, sings or plays music, Reachy notices it (not only words).
+  During music it sways along without talking over it, then reacts to the performance in the current personality.
 
 - The status says what Reachy is doing (*Asleep · ask the participant to rest a finger…*, *Snoring*, *In conversation*).
 - The current personality appears as Reachy in costume.

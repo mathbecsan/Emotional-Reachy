@@ -33,6 +33,7 @@ from .brain.personas import BASE, DEBRIEF, PERSONAS
 from .brain.prompts import CONTRACT
 from .brain.safety import is_stop, violates
 from .elevenlabs import API, DEFAULT_VOICE, api_key, find_device
+from .perception.sound_events import SoundWatcher
 
 
 logger = logging.getLogger(__name__)
@@ -199,6 +200,10 @@ class RealtimeConversation:
         self.last_silence_action = 0.0
         self.sense_t: dict[str, float] = {}
         self.last_direct, self.last_direct_t, self.direct_retries = "", 0.0, 0
+        self.sound = SoundWatcher(window_s=3.0, cooldown_s=2.0)   # claps, music, singing on the session mic
+        self.performing_since = 0.0
+        self.last_music_t = 0.0
+        self.last_clap_t = 0.0
         session.rt = self
 
     # ---------------------------------------------------------------- plumbing
@@ -235,7 +240,10 @@ class RealtimeConversation:
                 data, _ = st.read(block)
                 if time.monotonic() < self.speaking_until:   # half duplex: Reachy is talking
                     self.send({"user_audio_chunk": silence})
+                    self.sound.reset()
                     continue
+                for ev in self.sound.feed(data[:, 0]):
+                    self._on_sound(ev)
                 pcm = (np.clip(data[:, 0], -1, 1) * 32767).astype("<i2").tobytes()
                 self.send({"user_audio_chunk": base64.b64encode(pcm).decode()})
 
@@ -445,9 +453,40 @@ class RealtimeConversation:
             self.direct(self.last_direct)
             self.direct_retries = retries
         idle = now - max(self.last_user_t, self.speaking_until)
-        if idle > 11 and now - self.last_silence_action > 15 and not self.closing_t and self.switch_pending is None:
+        if (idle > 11 and now - self.last_silence_action > 15 and not self.closing_t and self.switch_pending is None
+                and not self.performing_since and now - self.last_music_t > 8):
             self.last_silence_action = now
             self.direct_switch("long silence")
+
+    # ---------------------------------------------------------------- performances
+    def _on_sound(self, event: str) -> None:
+        """Music, singing or claps heard on the mic (speech recognition alone would miss them)."""
+        s, now = self.s, time.monotonic()
+        who = f" as {self.show.current.name}" if self.show else ""
+        if event == "music":
+            self.last_music_t = now
+            if not self.performing_since:
+                self.performing_since = now
+                s.log.event("sound", s.clock.now(), sound="music", text="Music or singing: Reachy listens and sways along.")
+                s.body.play("groove" if self.show else "excited")      # react with the body, don't talk over it
+        elif event == "clapping" and now - self.last_clap_t > 20 and not self.performing_since:
+            self.last_clap_t = now
+            s.log.event("sound", s.clock.now(), sound="clapping", text="Clapping heard.")
+            s.body.play("big_bounce" if self.show else "excited")
+            self.direct(f"[Reachy senses] They are clapping. React to it right away{who}: are they applauding you, "
+                        "keeping a beat, or calling for attention? Respond playfully.")
+
+    def _performance_over(self) -> None:
+        s = self.s
+        secs = self.last_music_t - self.performing_since
+        self.performing_since = 0.0
+        s.log.event("sound", s.clock.now(), sound="performance_end", text=f"Performance ended ({secs:.0f} s).")
+        if self.closing_t:
+            return
+        who = f" in persona as {self.show.current.name}" if self.show else ""
+        self.direct(f"[Director] They just performed for you (music or singing, about {secs:.0f} seconds). React to the "
+                    f"performance{who} with real enthusiasm or a playful review, mention something about it, "
+                    "and ask them about it (what it was, where they learned it). You may call dance.")
 
     def _on_user(self, text: str) -> None:
         s = self.s
@@ -522,6 +561,8 @@ class RealtimeConversation:
                 self.context(self.stage_note(s.stage))
             if self.show is not None:
                 self._persona_senses(sig, t)
+            if self.performing_since and time.monotonic() - self.last_music_t > 4:
+                self._performance_over()
             jump = s.hub.consume_jump()
             if jump:
                 s.user.heart_moments.append((t, s.stage, jump, self.last_mode.value))

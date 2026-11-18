@@ -239,6 +239,7 @@ export function liveView(outlet) {
       case "prompt": log.note(e.text, "line--prompt"); break;
       case "command": log.note(`facilitator: ${e.cmd}`, "line--cmd"); break;
       case "stop": log.note(`STOP — ${e.reason}`, "line--stop"); toast(`Stopped: ${e.reason}`, "error"); break;
+      case "sound": log.note(`♫ ${e.text}`, "line--stage"); break;
       case "sensor":
         log.note(e.text, "line--prompt");
         if (/starts snoring/.test(e.text)) status.textContent = "Snoring · learning their resting heartbeat (about a minute)";

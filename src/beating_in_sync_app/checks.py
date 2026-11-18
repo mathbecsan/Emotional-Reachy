@@ -26,6 +26,18 @@ def _get(url: str, headers: dict | None = None, timeout: float = 3):
         return json.load(r)
 
 
+_sub_cache: tuple[float, dict] | None = None
+
+
+def _subscription(key: str) -> dict:
+    global _sub_cache
+    if _sub_cache and time.monotonic() - _sub_cache[0] < 60:
+        return _sub_cache[1]
+    sub = _get("https://api.elevenlabs.io/v1/user/subscription", {"xi-api-key": key}, timeout=6)
+    _sub_cache = (time.monotonic(), sub)
+    return sub
+
+
 def quick(runner) -> dict:
     out = {}
     try:
@@ -50,7 +62,7 @@ def quick(runner) -> dict:
         out["voice"] = {"ok": False, "detail": "No API key", "fix": "Add ELEVENLABS_API_KEY to the .env file."}
     else:
         try:
-            sub = _get("https://api.elevenlabs.io/v1/user/subscription", {"xi-api-key": key}, timeout=6)
+            sub = _subscription(key)
             left = sub.get("character_limit", 0) - sub.get("character_count", 0)
             out["voice"] = {"ok": left > 500, "detail": f"Connected · {left:,} characters left",
                             "fix": "" if left > 500 else "The ElevenLabs plan is almost used up."}
@@ -271,7 +283,7 @@ def sounds(seconds: float = 6.0) -> dict:
     levels = [round(float(min(1.0, r * 25)), 2) for r in rms]
     speech, events = None, []
     key = elevenlabs.api_key()
-    if key and peak_db - noise_db > 6:
+    if key and peak_db - noise_db > 4:
         buf = io.BytesIO()
         with wave.open(buf, "wb") as w:
             w.setnchannels(1)
@@ -284,11 +296,18 @@ def sounds(seconds: float = 6.0) -> dict:
                            files={"file": ("room.wav", buf.getvalue(), "audio/wav")})
             r.raise_for_status()
             text = (r.json().get("text") or "").strip()
-            events = sorted({e.strip().lower() for e in re.findall(r"\(([^)]{2,40})\)", text)})
-            speech = re.sub(r"\([^)]*\)", "", text).strip() or None
+            # Scribe tags sounds as (laughter) or [music]; everything else is speech
+            events = sorted({e.strip().lower() for e in re.findall(r"[\(\[]([^)\]]{2,40})[\)\]]", text)})
+            speech = re.sub(r"[\(\[][^)\]]*[\)\]]", "", text).strip(" .,") or None
         except httpx.HTTPError as e:
             logger.warning("sound test transcription failed: %s", e)
-    quiet = peak_db - noise_db <= 6
+    from .perception.sound_events import analyse, describe
+
+    local = analyse(a)
+    for e in describe(local):                       # claps / music / noise from the raw audio
+        if not any(w in " ".join(events) for w in e.split()[:1]):
+            events.append(e)
+    quiet = peak_db - noise_db <= 6 and not events
     loud_room = noise_db > -35
     parts = []
     if speech:
@@ -297,7 +316,7 @@ def sounds(seconds: float = 6.0) -> dict:
         parts.append("Sounds: " + ", ".join(events))
     if not parts:
         parts.append("Nothing stood out from the background" if quiet else "Sound picked up, nothing recognised")
-    return {"ok": not quiet, "speech": speech, "events": events, "levels": levels,
+    return {"ok": not quiet, "speech": speech, "events": events, "levels": levels, "analysis": local,
             "noise_db": round(noise_db), "peak_db": round(peak_db), "device": "Reachy" if dev is not None else "this computer",
             "detail": " · ".join(parts),
             "fix": ("The room is noisy: Reachy may mishear. Close doors or move away from fans." if loud_room else
@@ -309,7 +328,7 @@ class TrackProbe(threading.Thread):
     """Camera test: finds the person, tells whether they face Reachy or are turned away,
     and (with the robot connected) turns Reachy's head to follow them. Runs up to 40 s."""
 
-    def __init__(self, bus, robot=None, index: int = 0, seconds: float = 40):
+    def __init__(self, bus, robot=None, index: int = 0, seconds: float = 90):
         super().__init__(daemon=True, name="track-probe")
         self.bus, self.robot, self.index, self.seconds = bus, robot, index, seconds
         self.stop_event = threading.Event()
@@ -371,7 +390,11 @@ class TrackProbe(threading.Thread):
                             logger.debug("follow failed: %s", e)
                             self.robot = None
                     state = "facing" if facing else "turned"
+                    # Where the person stands, in degrees from Reachy's front (+ = the person's left).
+                    # Following recentres the face in the picture, so add the head turn back in.
+                    angle = fx * 30 - (yaw if self.robot is not None else 0.0)
                     self.bus.emit("track", ok=True, face=True, x=round(float(fx), 2), y=round(float(fy), 2), state=state,
+                                  angle=round(float(angle)), head_yaw=round(yaw),
                                   following=self.robot is not None, left=round(self.seconds - (time.monotonic() - t0)),
                                   facing_seen=seen_front, away_seen=seen_away, moved=round(moved, 1))
                 else:
@@ -392,37 +415,68 @@ class TrackProbe(threading.Thread):
 
 
 # ---------------------------------------------------------------- range of motion
-MOBILITY = [
-    ("look_left", "Look left", dict(yaw=40)), ("look_right", "Look right", dict(yaw=-40)),
-    ("look_up", "Look up", dict(pitch=-25)), ("look_down", "Look down", dict(pitch=25)),
-    ("tilt", "Tilt the head", dict(roll=25)), ("lift", "Stretch up", dict(z=15)),
-    ("turn_left", "Turn the body left", dict(body_yaw=150, yaw=150)), ("turn_right", "Turn the body right", dict(body_yaw=-150, yaw=-150)),
-    ("antennas", "Wave the antennas", dict(ant=(-60, 40))),
+# Each move: (key, label, group, [(pose, seconds), ...]); pose keys: yaw pitch roll x z (head, deg/mm),
+# body (deg), ant (two antenna angles, deg). Every move returns to neutral afterwards.
+def _seq(*poses, dur=0.7):
+    return [(p, dur) for p in poses]
+
+
+MOVES = [
+    ("look_left", "Look left", "Head", _seq(dict(yaw=40))),
+    ("look_right", "Look right", "Head", _seq(dict(yaw=-40))),
+    ("look_up", "Look up", "Head", _seq(dict(pitch=-25))),
+    ("look_down", "Look down", "Head", _seq(dict(pitch=25))),
+    ("look_up_left", "Look up and left", "Head", _seq(dict(yaw=30, pitch=-20))),
+    ("look_down_right", "Look down and right", "Head", _seq(dict(yaw=-30, pitch=20))),
+    ("tilt_left", "Tilt left", "Head", _seq(dict(roll=25))),
+    ("tilt_right", "Tilt right", "Head", _seq(dict(roll=-25))),
+    ("circle", "Roll the head in a circle", "Head", _seq(dict(pitch=-15), dict(yaw=25), dict(pitch=15), dict(yaw=-25), dur=0.45)),
+    ("nod", "Nod yes", "Expressions", _seq(dict(pitch=15), dict(pitch=-5), dict(pitch=15), dur=0.3)),
+    ("shake", "Shake no", "Expressions", _seq(dict(yaw=25), dict(yaw=-25), dict(yaw=20), dur=0.3)),
+    ("curious", "Curious tilt", "Expressions", _seq(dict(roll=20, pitch=-8, ant=(-30, 10)), dur=0.6)),
+    ("lift", "Stretch up", "Height & lean", _seq(dict(z=20))),
+    ("sink", "Sink down", "Height & lean", _seq(dict(z=-15))),
+    ("lean_forward", "Lean forward", "Height & lean", _seq(dict(x=15, pitch=10))),
+    ("lean_back", "Lean back", "Height & lean", _seq(dict(x=-15, pitch=-10))),
+    ("turn_left", "Turn the body left (150°)", "Body", _seq(dict(body=150, yaw=150), dur=1.4)),
+    ("turn_right", "Turn the body right (150°)", "Body", _seq(dict(body=-150, yaw=-150), dur=1.4)),
+    ("over_shoulder", "Look over the shoulder", "Body", _seq(dict(body=90, yaw=140), dur=1.2)),
+    ("ant_one", "Both antennas one way", "Antennas", _seq(dict(ant=(-60, -60)))),
+    ("ant_other", "Both antennas the other way", "Antennas", _seq(dict(ant=(60, 60)))),
+    ("ant_left", "Left antenna only", "Antennas", _seq(dict(ant=(0, -60)))),
+    ("ant_right", "Right antenna only", "Antennas", _seq(dict(ant=(-60, 0)))),
+    ("ant_wave", "Wave the antennas", "Antennas", _seq(dict(ant=(-50, 40)), dict(ant=(40, -50)), dict(ant=(-50, 40)), dur=0.25)),
 ]
+MOBILITY = [(k, label) for k, label, *_ in MOVES]
 
 
-def mobility(robot, bus) -> dict:
+def mobility(robot, bus, group: str | None = None) -> dict:
     """Run Reachy through its range of motion, step by step (the body turns +-150 deg: its limit is +-160,
-    so a full 360 isn't possible)."""
+    so a full 360 isn't possible). `group` limits the test to Head / Expressions / Height & lean / Body / Antennas."""
     if robot is None:
         return {"ok": False, "detail": "Reachy isn't connected", "fix": "Connect Reachy first (step 1 of the setup)."}
     import numpy as np
     from reachy_mini.utils import create_head_pose
 
+    moves = [m for m in MOVES if not group or m[2] == group]
     done = []
+
+    def go(p, dur):
+        head = create_head_pose(x=p.get("x", 0), z=p.get("z", 0), roll=p.get("roll", 0), pitch=p.get("pitch", 0),
+                                yaw=p.get("yaw", 0), mm=True, degrees=True)
+        robot.goto_target(head=head, antennas=np.deg2rad(list(p.get("ant", (0, 0)))), body_yaw=np.deg2rad(p.get("body", 0)),
+                          duration=dur)
+
     try:
-        for key, label, p in MOBILITY:
-            bus.emit("mobility", step=key, label=label, status="moving")
-            head = create_head_pose(z=p.get("z", 0), roll=p.get("roll", 0), pitch=p.get("pitch", 0), yaw=p.get("yaw", 0),
-                                    mm=True, degrees=True)
-            ant = p.get("ant", (0, 0))
-            robot.goto_target(head=head, antennas=np.deg2rad(list(ant)), body_yaw=np.deg2rad(p.get("body_yaw", 0)),
-                              duration=1.2 if "body_yaw" in p else 0.7)
-            robot.goto_target(head=create_head_pose(), antennas=np.deg2rad([0, 0]), body_yaw=0.0, duration=0.8)
+        for key, label, grp, seq in moves:
+            bus.emit("mobility", step=key, label=label, group=grp, status="moving")
+            for pose, dur in seq:
+                go(pose, dur)
+            go({}, 1.2 if any("body" in p for p, _ in seq) else 0.6)
             done.append(key)
-            bus.emit("mobility", step=key, label=label, status="done")
+            bus.emit("mobility", step=key, label=label, group=grp, status="done")
     except Exception as e:  # SDK errors when the daemon drops mid-test
         bus.emit("mobility", step=None, status="error")
-        return {"ok": False, "done": done, "detail": f"Stopped after {len(done)} of {len(MOBILITY)} moves",
+        return {"ok": False, "done": done, "detail": f"Stopped after {len(done)} of {len(moves)} moves",
                 "fix": f"Check that nothing blocks Reachy and that it's on in Reachy Mini Control. ({e})"}
     return {"ok": True, "done": done, "detail": f"All {len(done)} moves played"}
