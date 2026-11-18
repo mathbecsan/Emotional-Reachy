@@ -5,6 +5,9 @@ Mounted on the FastAPI app the Reachy Mini dashboard hands to the app
 run standalone -- the same arrangement as reachy_mini_conversation_app.
 """
 import asyncio
+import time
+import threading
+import math
 import json
 import logging
 from dataclasses import asdict, fields
@@ -259,6 +262,35 @@ def mount_routes(app: FastAPI, runner: SessionRunner, bus: EventBus, cfg: Config
         except OSError as e:
             logger.warning("couldn't save the camera choice: %s", e)
         return {"ok": True, "index": index}
+
+    projector = {"thread": None}
+
+    @app.post("/api/check/projector")
+    async def check_projector(body: dict | None = None) -> dict:
+        """Projector test: a simulated heartbeat (65 -> 115 -> 70 BPM over ~14 s) sent through the same
+        live event stream the projection uses in a session, so the projected visualization should
+        pulse and speed up. The projection window reports what it received to the checklist."""
+        idle()
+        t = projector["thread"]
+        if t is not None and t.is_alive():
+            return {"ok": True, "already": True}
+
+        def run() -> None:
+            t0, beat_t = time.monotonic(), time.monotonic()
+            while (el := time.monotonic() - t0) < 14:
+                bpm = 65 + 50 * math.sin(math.pi * min(1.0, el / 14)) ** 1.5
+                bus.emit("heart", t=round(el, 2), bpm=round(bpm, 1), test=True)
+                for _ in range(10):
+                    now = time.monotonic()
+                    if now - beat_t >= 60 / bpm:
+                        beat_t = now
+                        bus.emit("pulse", beat=True, sensors=[], source="projector test", test=True)
+                    time.sleep(0.1)
+            bus.emit("projector_test", done=True)
+
+        projector["thread"] = threading.Thread(target=run, daemon=True, name="projector-test")
+        projector["thread"].start()
+        return {"ok": True, "seconds": 14}
 
     @app.post("/api/check/track/center")
     async def check_track_center() -> dict:

@@ -199,4 +199,19 @@ PARTICIPANTS = {
             {"say": "pause"},
         ],
     },
+    "tone": {
+        "title": "Same words, different tone",
+        "about": "Short, neutral words whose meaning is carried by the tone of voice. Tests whether Reachy reacts to how things are said.",
+        "cast": ["tia", "hype_bro", "noir"], "switch_every": 3, "tone": "playful",
+        "script": [
+            {"voice": "usual"}, {"say": "Yeah, okay."},
+            {"say": "I'm Lena. I teach high school chemistry."},
+            {"voice": "low"}, {"say": "It's fine. Work is fine."},
+            {"voice": "irritated"}, {"say": "Sure. Whatever you say."},
+            {"voice": "excited"}, {"say": "Oh, wait, you like science? Okay, now we're talking."},
+            {"voice": "nervous"}, {"say": "I mean, I don't know, maybe, I guess."},
+            {"voice": "excited"}, {"say": "Yes! That's exactly it."},
+            {"voice": "low"}, {"say": "Okay."},
+        ],
+    },
 }

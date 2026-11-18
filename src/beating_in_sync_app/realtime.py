@@ -27,13 +27,14 @@ from pathlib import Path
 
 import httpx
 
-from .body.gestures import EXPRESS_GESTURES, GESTURES, at_speed
+from .body.gestures import EXPRESS_GESTURES, GESTURES, at_speed, transition
 from .brain.director import STAGE_GOALS
 from .brain.modes import PROVOCATIONS, Mode
 from .brain.personas import BASE, DEBRIEF, PERSONAS
 from .brain.prompts import CONTRACT
 from .brain.safety import is_stop, violates
 from .elevenlabs import API, DEFAULT_VOICE, api_key, find_device
+from .perception.prosody import VoiceTone
 from .perception.sound_events import SoundWatcher
 
 
@@ -114,7 +115,8 @@ def agent_spec(profile, voice_id: str, llm: str) -> tuple[dict, list]:
             "asr": {"user_input_audio_format": "pcm_16000", "quality": "high"},
             # personas: a quiet participant gets an in-persona poke after 5 s (silence ladder)
             "turn": {"turn_timeout": 5 if personas else 8, "turn_eagerness": "normal"},
-            "conversation": {"max_duration_seconds": 1200 if personas else 900},
+            # personas: long enough for several "keep talking" rounds (the app closes the interview itself)
+            "conversation": {"max_duration_seconds": 2700 if personas else 900},
         },
     }
     return body, tools
@@ -214,6 +216,15 @@ class RealtimeConversation:
         self.first_word_pending = True
         self.started_t = time.monotonic()
         self.finger_off_t: float | None = None
+        self.ending_t = 0.0          # when Reachy asked whether to keep going (0 = not near the end)
+        self.ending_exchanges = 0
+        self.tone = VoiceTone()                    # how they say it (perception/prosody.py)
+        self.last_tone = ("", 0.0)
+        self.room_n = self.room_seen_n = 1
+        self.room_seen_t = time.monotonic()
+        self.room_announced = False
+        self.face_ws: "deque" = deque(maxlen=150)
+        self.last_distance_t = 0.0
         self.finger_steps: set[str] = set()
 
     # ---------------------------------------------------------------- plumbing
@@ -251,7 +262,11 @@ class RealtimeConversation:
                 if time.monotonic() < self.speaking_until:   # half duplex: Reachy is talking
                     self.send({"user_audio_chunk": silence})
                     self.sound.reset()
+                    self.tone.reset()
                     continue
+                reading = self.tone.feed(data[:, 0])
+                if reading is not None:
+                    self._on_tone(reading)
                 for ev in self.sound.feed(data[:, 0]):
                     self._on_sound(ev)
                 self.world.append(data[:, 0].copy())
@@ -350,7 +365,7 @@ class RealtimeConversation:
         if self.switch_pending == key:
             self.switch_pending = None
         p = show.current
-        s.body.play(GESTURES[show.glitch_gesture()] + GESTURES[p.entrance])
+        s.body.play(transition(p.entrance, show.glitch_gesture()))
         self.emit_persona(reason)
         return f"You are now {p.name}. Glitch line: {p.glitch_in} Then: {p.opener}", False
 
@@ -362,18 +377,51 @@ class RealtimeConversation:
         show = self.show
         nxt = show.upcoming
         if nxt is None:
-            if not self.closing_t:
-                show.finished = True
-                self.closing_t = time.monotonic()
-                self.direct("[Director] That was the whole cast. Close now as Base Reachy: call reachy_switch_persona "
-                             f"with base, thank them warmly, say \"{DEBRIEF}\" and say goodbye. Do not ask a question.")
+            self._warn_end(reason)
             return
         self.switch_pending = nxt.key
         act = show.next_activity() if show.i >= 1 or len(show.cast) <= 2 else None
-        self.direct(f"[Director] Switch persona now ({reason}): react to their last words in one short beat, then call "
+        self.direct(f"[Director] Switch persona now ({reason}): react to their last words in one short beat, give a short "
+                    "cue in your own words that something is shifting (different every time), then call "
                     f"reachy_switch_persona with {nxt.key}, say "
                     f"\"{nxt.glitch_in}\" and the {nxt.name} opener with a question."
                     + (f" Then, as {nxt.name}, lead this activity: {act['agent']}" if act else ""))
+
+    ending_t = 0.0             # when Reachy asked whether to keep going (0 = not near the end)
+    ending_exchanges = 0
+    ENDING_GRACE_S = 75.0      # after the "nearly time" question, close if nobody decides by then
+    ENDING_EXCHANGES = 2       # ... or after this many more exchanges without a "keep going"
+
+    def _warn_end(self, reason: str) -> None:
+        """The planned length is reached: instead of cutting off, Reachy says so in persona and asks
+        whether to keep going; the console offers Keep talking / Finish now (user feedback 2026-11-18)."""
+        if self.closing_t or self.ending_t:
+            return
+        self.ending_t, self.ending_exchanges = time.monotonic(), 0
+        p = self.show.current
+        self.s.log.event("ending", self.s.clock.now(), status="soon", reason=reason, persona=p.key)
+        self.direct(f"[Director] We're near the end of the planned interview. Stay {p.name}: react to their last "
+                    "words, then in one playful line say you'll have to go soon and ask if they want to keep "
+                    "talking a bit longer. Don't say goodbye yet.")
+
+    def _extend(self, who: str) -> None:
+        show = self.show
+        if self.closing_t:
+            return
+        show.extend(who)
+        self.ending_t = 0.0
+        self.s.log.event("ending", self.s.clock.now(), status="extended", by=who, round=show.extensions + 1)
+        nxt = show.upcoming
+        self.direct("[Director] They want to keep going: great. Say so happily in one short line and carry on "
+                    f"as {show.current.name}" + (f"; more personas will come ({nxt.name} next)." if nxt else "."))
+
+    def _close(self, why: str) -> None:
+        if self.closing_t:
+            return
+        self.show.finished = True
+        self.closing_t = time.monotonic()
+        self.direct(f"[Director] {why} Close now as Base Reachy: call reachy_switch_persona "
+                    f"with base, thank them warmly, say \"{DEBRIEF}\" and say goodbye. Do not ask a question.")
 
     def persona_command(self, kind: str, key: str | None = None) -> None:
         """Facilitator buttons during a live persona session."""
@@ -392,13 +440,13 @@ class RealtimeConversation:
                 show.cast.insert(show.i + 1, key)
             self.direct(f"[Director] Switch persona now: call reachy_switch_persona with {key}, then say "
                          f"\"{p.glitch_in}\" and the {p.name} opener.")
+        elif kind == "extend":
+            self._extend("facilitator")
         elif kind == "close":
-            show.i = len(show.cast) - 1
-            show.reset_mode = False
-            self.direct_switch("facilitator")
-            if not self.closing_t:
-                show.finished = True
-                self.closing_t = time.monotonic()
+            # The current persona stays current until the agent switches to base (trial run: moving the
+            # show to the last persona here mislabelled the current persona's last line).
+            self.s.log.event("ending", self.s.clock.now(), status="closing", by="facilitator")
+            self._close("The facilitator is closing the interview.")
 
     def persona_done(self) -> bool:
         if not self.closing_t:
@@ -426,6 +474,18 @@ class RealtimeConversation:
                          "\"Hey, just joking. You're doing great.\" Stay kind and gentle as Base Reachy.")
             return
         if self.closing_t or self.switch_pending:
+            return
+        if self.ending_t:
+            if show.wants_more(text):
+                self._extend("participant")
+            elif show.wants_end(text):
+                s.log.event("ending", s.clock.now(), status="closing", by="participant")
+                self._close("They'd like to wrap up.")
+            else:
+                self.ending_exchanges += 1
+                if self.ending_exchanges >= self.ENDING_EXCHANGES:
+                    s.log.event("ending", s.clock.now(), status="closing", by="time")
+                    self._close("That's the end of the interview.")
             return
         show.on_exchange()
         if show.reset_mode and show.exchanges >= show.switch_every:
@@ -465,8 +525,13 @@ class RealtimeConversation:
             retries = self.direct_retries + 1
             self.direct(self.last_direct)
             self.direct_retries = retries
+        if self.ending_t and not self.closing_t and now - self.ending_t > self.ENDING_GRACE_S \
+                and now > self.speaking_until + 2:
+            s.log.event("ending", s.clock.now(), status="closing", by="time")
+            self._close("That's the end of the interview.")
         idle = now - max(self.last_user_t, self.speaking_until)
-        if (idle > 11 and now - self.last_silence_action > 15 and not self.closing_t and self.switch_pending is None
+        if (idle > 11 and now - self.last_silence_action > 15 and not self.closing_t and not self.ending_t
+                and self.switch_pending is None
                 and not self.performing_since and now - self.last_music_t > 8):
             self.last_silence_action = now
             self.direct_switch("long silence")
@@ -641,10 +706,65 @@ class RealtimeConversation:
                 self.context(f"[Reachy senses] You can see their face: they look {sig.face_emotion}. React to it "
                              "naturally (never comment on their appearance, only the expression).")
             self._finger(sig)
+            self._room(sig)
             if sig.bpm_overlimit_s >= s.cfg.bpm_stop_duration_s:
                 s.stop_reason = "BPM above limit"
                 self.closed.set()
             s.clock.sleep(1.0)
+
+    def _on_tone(self, r) -> None:
+        """Tone of voice -> the agent, so it reacts to how something was said, not only to the words."""
+        s = self.s
+        s.log.event("tone", s.clock.now(), labels=r.labels, mood=r.mood, seconds=round(r.seconds, 1),
+                    loudness_db=round(r.loudness_db, 1), pitch_hz=r.pitch_hz and round(r.pitch_hz),
+                    spread_st=round(r.spread_st, 1), rate=round(r.rate, 1))
+        if not r.text or self.closing_t:
+            return
+        key, now = " ".join(r.labels), time.monotonic()
+        if key == self.last_tone[0] and now - self.last_tone[1] < 20:
+            return
+        self.last_tone = (key, now)
+        who = f" as {self.show.current.name}" if self.show else ""
+        self.context(f"[Reachy senses] Tone of voice: {r.text}. Let it shape your reaction{who} (match or play "
+                     "against their energy); never describe it like a measurement.")
+
+    def _room(self, sig) -> None:
+        """What the camera sees of the room, in words, when it changes: how many people, where the
+        participant is, arrivals and departures, coming closer or stepping back."""
+        if not sig.face_t:                       # no camera this session
+            return
+        s, now = self.s, time.monotonic()
+        who = f" as {self.show.current.name}" if self.show else ""
+        n = sig.num_people if now - sig.face_t < 3 else 0
+        if n != self.room_seen_n:
+            self.room_seen_n, self.room_seen_t = n, now
+        stable = now - self.room_seen_t >= 3.0
+        if stable and n != self.room_n and not self.closing_t:
+            before, self.room_n = self.room_n, n
+            gaze = getattr(s.body, "gaze", None)
+            where = gaze.where() if gaze is not None else "in front of you"
+            if n == 0 and before:
+                self.context(f"[Reachy senses] You can't see them any more: they stepped out of your camera's view. "
+                             f"If it lasts, wonder out loud{who} where they went.")
+            elif n >= 2 and before < 2:
+                self.context(f"[Reachy senses] There are {n} people in view now: the participant ({where}) and "
+                             f"{n - 1} more. You may pull the others in briefly{who} (an audience, a jury), "
+                             "never commenting on how anyone looks.")
+            elif n == 1 and before >= 2:
+                self.context("[Reachy senses] It's just the participant in view again.")
+            elif n == 1 and before == 0 and self.room_announced:
+                self.context(f"[Reachy senses] They're back in view, {where}.")
+            self.room_announced = True
+        if sig.face_w and now - sig.face_t < 1:
+            self.face_ws.append(sig.face_w)
+            if len(self.face_ws) >= 30 and now - self.last_distance_t > 25 and not self.closing_t:
+                ref = sorted(self.face_ws)[len(self.face_ws) // 2]
+                if sig.face_w > ref * 1.6:
+                    self.last_distance_t = now
+                    self.context(f"[Reachy senses] They just leaned in closer to you. React{who} if it fits.")
+                elif sig.face_w < ref * 0.6:
+                    self.last_distance_t = now
+                    self.context(f"[Reachy senses] They stepped back from you. React{who} if it fits.")
 
     def _finger(self, sig) -> None:
         """The lifted-finger ladder (session flow v2, Act 1c): glance, ask, get sleepy. The session

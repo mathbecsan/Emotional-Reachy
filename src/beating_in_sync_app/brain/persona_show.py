@@ -61,6 +61,8 @@ class PersonaShow:
         self._asked: dict[str, list[str]] = {}
         self.activities: list[str] = []     # led one per persona switch (brain/activities.py)
         self.style = ""                     # tone / reply length / activity list for the agent
+        self.lap = [k for k in self.cast if k != BASE]   # one more round of the cast, when asked to keep going
+        self.extensions = 0
 
     # ------------------------------------------------------------ state
     @property
@@ -105,6 +107,30 @@ class PersonaShow:
         self.reset_mode = True
         self.exchanges = 0
         self.history.append((BASE, reason))
+
+    def extend(self, reason: str = "keep talking") -> None:
+        """Keep the interview going past its planned length: one more round of the cast
+        (teasing personas left out if they were dropped), or more Base Reachy after a reset."""
+        self.finished = False
+        self.extensions += 1
+        if not self.reset_mode:
+            lap = [k for k in self.lap if k in self.cast or not PERSONAS[k].teases]
+            nxt = [k for k in lap if k != self.cast[self.i]] or lap
+            self.cast = self.cast[: self.i + 1] + nxt
+        self.exchanges = 0
+        self.history.append((self.current.key, f"extended ({reason})"))
+
+    @staticmethod
+    def wants_more(text: str) -> bool:
+        low = text.lower()
+        return bool(re.search(r"\b(yes|yeah|yep|sure|of course|keep going|go on|more|continue|don'?t go|"
+                              r"let'?s keep|absolutely|definitely|s[ií]|claro|dale)\b", low)) and not PersonaShow.wants_end(text)
+
+    @staticmethod
+    def wants_end(text: str) -> bool:
+        low = text.lower()
+        return bool(re.search(r"\b(no|nope|nah|bye|goodbye|that'?s (enough|it)|i'?m (done|good)|wrap (it )?up|"
+                              r"finish|let'?s stop|adi[oó]s)\b", low))
 
     def drop_teasing(self) -> None:
         """Second discomfort cue: no teasing personas from now on."""

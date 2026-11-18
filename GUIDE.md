@@ -25,6 +25,13 @@ A session follows five acts (the full design is *Session Flow v2: Official Struc
    A lifted finger mid-conversation gets a playful "finger back, please", never a stop.
 5. **Goodbye.** Reachy closes as its friendly self, says goodbye, and goes back to sleep.
 
+While it's awake, Reachy **keeps looking at the participant** through its camera: its head follows
+them, its body turns slowly when they move to the side, it leans in when they're far away, glances at
+other people in the room now and then, and keeps doing all of this while it gestures. It also listens to
+**how** things are said (louder, quieter, faster, flatter, more animated than that person's usual voice)
+and lets that shape its reply. Persona switches are a gentle "processing" moment with a short spoken cue,
+and Reachy says at the start that its personality may glitch as you talk.
+
 Everything is saved, so you can replay the session afterwards.
 
 ---
@@ -74,7 +81,10 @@ There are **three pieces**, and they start in this order:
 
 ### Setup checklist (before every participant)
 
-Seven short screens that **unlock in order**: pass a step (or press *Skip*) to open the next one.
+It is the first item in the main menu. Pressing **New session** asks whether the checklist is done (and shows
+which steps passed in the last 3 hours) before going on.
+
+Seven short steps and a summary, which **unlock in order**: pass a step (or press *Skip*) to open the next one.
 The map on the left shows each step's result: **✓** passed, **!** needs fixing, **–** skipped, 🔒 not yet unlocked.
 Every screen says what is being tested, gives feedback straight away, and, if
 something fails, explains what it means and what to try.
@@ -87,6 +97,7 @@ something fails, explains what it means and what to try.
 | **4 Talk with Reachy** | *Start the chat*: Reachy asks three quick questions and wraps each one up | It understood at least 2 answers and you heard it clearly |
 | **5 Range of motion** | Clear the space, press *Run every move* (or *Run* one group) | All 24 moves play; body turns are measured |
 | **6 See & follow** | *Start*, then do what Reachy says: look at it, turn away, look back; stand up, walk far to your left (out of its view), far to your right, back to the middle | Reachy sees where you look and turns its **body** to follow you (it searches when you leave its view) |
+| **7 Light projector** | Turn the projector on and connect it (System Settings › Displays: *Extend*). *Find the projector*, *Open on the projector* (click the window and press **F** for full screen), then *Send a test heartbeat* and watch the wall | The projection window receives the live heartbeat (the page shows how many beats arrived) and you answer *Yes*: the waves pulse and speed up on the wall |
 
 **Reachy talks you through it** (switch off with *Voice guide* under the step map):
 
@@ -131,6 +142,10 @@ Once a step has been reached it stays open, so you can go back and re-test witho
 - **Latency** (debug mode) shows how fast Reachy answers: fingertip → wake, wake → first word, and each reply, green within the target, yellow acceptable, red slow.
 - The current personality appears as Reachy in costume.
 - **Personality now** shows the line-up. Click a name to jump to it, or use **Next personality**, **Reset to Base** or **Close interview**.
+- **The session length is a guide, not a cut-off.** When the planned length is reached, Reachy says so in
+  character and asks whether to keep talking, and a bar appears: **Keep talking** adds another round of
+  personalities, **Finish now** closes. A "yes, keep going" from the participant also adds a round; a "no" or
+  "bye" closes. **Keep talking +** next to *Close interview* works at any time.
 - **End session** stops kindly at any time.
 - The participant can always say **"Reachy, reset"**.
 

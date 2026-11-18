@@ -16,11 +16,20 @@ const STEPS = [
   { key: "talk", intro: "Press Start the chat. I'll ask you three quick questions.", title: "Talk with Reachy", costume: "diva", color: "#ff6fb1", why: "A short chat: you hear Reachy clearly, and it understands your answers." },
   { key: "mobility", intro: "Clear the space around me, then press Run every move.", title: "Range of motion", costume: "villain", color: "#b98cff", why: "Head, antennas and body move freely, with nothing in the way." },
   { key: "see", intro: "Sit in front of me, about one metre away, and press Start. Then do what I say.", title: "See & follow", costume: "noir", color: "#ffc94d", why: "Reachy sees where you look and turns its head and body to follow you, even beyond its camera's view." },
+  { key: "projector", intro: "Turn the light projector on and connect it to this computer. Then press Find the projector.", title: "Light projector", costume: "smug", color: "#7be0a8", why: "The participant's heartbeat is projected as light, live during the session and in the replay." },
 ];
 const STORE = "bis.setup.v3";
 const loadResults = () => {
   try { const r = JSON.parse(localStorage.getItem(STORE)); return r && Date.now() - r.t < 3 * 3600e3 ? r.results : {}; } catch { return {}; }
 };
+/** For the "New session" pop-up: how far the checklist got in this browser (results last 3 hours). */
+export function setupStatus() {
+  let t = 0, results = {};
+  try { const r = JSON.parse(localStorage.getItem(STORE)); if (r && Date.now() - r.t < 3 * 3600e3) { t = r.t; results = r.results || {}; } } catch { /* private */ }
+  const steps = STEPS.map((s) => ({ key: s.key, title: s.title, state: results[s.key] || "none" }));
+  return { steps, done: steps.every((s) => s.state === "pass" || s.state === "skip"),
+    passed: steps.filter((s) => s.state === "pass").length, minutesAgo: t ? Math.round((Date.now() - t) / 60000) : null };
+}
 const saveResults = (results) => { try { localStorage.setItem(STORE, JSON.stringify({ t: Date.now(), results })); } catch { /* private */ } };
 const post = (path, body = {}) => api(path, body);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -352,6 +361,90 @@ export function checkView(outlet, startKey) {
           () => { fb.set("fail", "Something looked off", "", "Make sure nothing touches the head, antennas or base and Reachy sits on a flat surface. Power-cycle the robot if a joint seems stuck."); setResult("mobility", "fail"); }));
       }
       return off;
+    },
+
+    projector(fb, area) {
+      // 1. find the projector as a second screen  2. open the visualization on it
+      // 3. send a simulated heartbeat through the live event stream  4. the facilitator confirms on the wall
+      const tasks = ["Projector connected as a second screen", "Visualization open on the projector",
+        "Live heartbeat reaches the projection", "You can see it pulsing on the wall"].map(task);
+      const facts = h("ul", { class: "facts" });
+      const slot = h("div");
+      const channel = "BroadcastChannel" in window ? new BroadcastChannel("bis-projection") : null;
+      let target = null, win = null, last = null, testStart = null;
+      const fact = (ok, label, text) => h("li", { "data-ok": String(ok) }, h("b", {}, `${label}: `), text);
+      const show = () => {
+        const rows = [];
+        if (target) rows.push(fact(true, "Projector", target.label));
+        if (last) rows.push(fact(true, "Projection window", `${last.w}×${last.h}${last.fullscreen ? ", full screen" : ", not full screen yet (click it and press F)"} · ${last.fps} frames/s`));
+        if (last && testStart) rows.push(fact(last.testHeart >= 5, "Live data", `${last.testHeart} heart-rate updates and ${last.testBeats} beats received${last.bpm ? ` · now ${Math.round(last.bpm)} BPM` : ""}`));
+        facts.replaceChildren(...rows);
+      };
+      if (channel) channel.onmessage = (m) => {
+        const d = m.data || {};
+        if (d.type === "closed") { last = null; tasks[1].done(false); show(); return; }
+        if (d.type !== "status") return;
+        last = d;
+        if (d.live) tasks[1].done();
+        if (testStart && d.testHeart >= 5 && d.testBeats >= 5 && !tasks[2].isDone()) {
+          tasks[2].done();
+          slot.replaceChildren(ask("Look at the projected image: can you see the coloured waves pulsing with the beat, getting faster in the middle of the test?",
+            () => { tasks[3].done(); fb.set("pass", "The projector shows the heartbeat", last.fullscreen ? "" : "Tip: click the projection window and press F so it fills the wall."); setResult("projector", "pass"); slot.replaceChildren(); },
+            () => { fb.set("fail", "The projection runs, but it isn't visible on the wall", "The window is receiving the heartbeat, so the problem is the picture.",
+              "Check the projector's input source (HDMI), its brightness and focus, and that the window is on the projector's screen (drag it there, then press F). In System Settings › Displays choose Extend, not Mirror, if the wall shows this screen instead."); setResult("projector", "fail"); }));
+        }
+        show();
+      };
+      const find = async () => {
+        tasks[0].done(false); target = null;
+        let list = null;
+        if ("getScreenDetails" in window) {
+          try {
+            const d = await window.getScreenDetails();
+            list = d.screens.map((x) => ({ label: `${x.label || "Screen"} (${x.width}×${x.height})`, left: x.availLeft, top: x.availTop,
+              w: x.availWidth, h: x.availHeight, main: x.isPrimary, internal: x.isInternal }));
+          } catch { /* permission declined: fall back below */ }
+        }
+        const other = list?.find((x) => !x.main && !x.internal) || list?.find((x) => !x.main);
+        if (other) { target = other; tasks[0].done(); fb.set("wait", "Projector found. Press Open on the projector."); show(); return; }
+        if (window.screen.isExtended) {
+          target = { label: "a second screen (position unknown: drag the window there)" }; tasks[0].done();
+          fb.set("wait", "A second screen is connected. Press Open on the projector, then drag the window onto it if needed."); show(); return;
+        }
+        fb.set("fail", "No projector found", "This computer only sees its own screen.",
+          "Plug the projector's HDMI cable into this computer (use the adapter if needed) and turn the projector on. Then open System Settings › Displays and choose Extend. Press Find the projector again. If the projector mirrors this screen on purpose, press It's mirroring this screen.");
+      };
+      const open = () => {
+        const f = target?.left != null ? `left=${target.left},top=${target.top},width=${target.w},height=${target.h}` : "width=1280,height=720";
+        win = window.open("#/projection", "bis-projection", f);
+        if (!win) { fb.set("fail", "The projection window was blocked", "", "Allow pop-ups for this page (the icon at the right of the address bar), then press Open on the projector again."); return; }
+        fb.set("wait", "Click the projection window once and press F for full screen. Then come back and press Send a test heartbeat.");
+        setTimeout(() => channel?.postMessage({ type: "ping" }), 1500);
+      };
+      const test = async () => {
+        if (!last) { fb.set("fail", "The projection window isn't open", "", "Press Open on the projector first. If it's already open, reload it (click it, then Cmd+R)."); return; }
+        testStart = Date.now(); tasks[2].done(false); tasks[3].done(false); slot.replaceChildren();
+        await post("/api/check/projector");
+        fb.set("wait", "Sending a test heartbeat for 14 seconds. Watch the wall: the waves should pulse and speed up.");
+        setTimeout(() => {
+          if (testStart && !tasks[2].isDone()) {
+            fb.set("fail", "The projection isn't receiving the heartbeat", "The window is open but no live data reached it.",
+              "Reload the projection window (click it, then Cmd+R) and send the test again. If its corner says offline, the app's server isn't reachable from that window.");
+            setResult("projector", "fail");
+          }
+        }, 7000);
+      };
+      area.append(h("ul", { class: "tasks" }, tasks.map((t) => t.el)), facts,
+        h("div", { class: "btn-row" },
+          busyBtn("Find the projector", find),
+          busyBtn("Open on the projector", async () => open(), false),
+          busyBtn("Send a test heartbeat", test, false),
+          h("button", { type: "button", class: "link-sm", onclick: () => { target = { label: "mirroring this screen" }; tasks[0].done(); show(); fb.set("wait", "OK, mirroring. Press Open on the projector."); } }, "It's mirroring this screen")),
+        slot);
+      if (results.projector === "pass") fb.set("pass", "The projector shows the heartbeat", "Passed earlier. Test again any time.");
+      else fb.set("wait", "Turn the projector on and press Find the projector.");
+      channel?.postMessage({ type: "ping" });        // a projection window may already be open
+      return () => { channel?.close(); };
     },
 
     see(fb, area) {

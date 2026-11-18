@@ -217,7 +217,7 @@ export function builderView(outlet, presetId) {
       length: () => {
         const n = effective().length;
         return [
-          heading("How long is the session?", isPersonas() ? `With ${n} personalities, Reachy adjusts how long it stays in each.` : "The Beating in Sync protocol has fixed stages (about 15 minutes)."),
+          heading("How long is the session?", isPersonas() ? `With ${n} personalities, Reachy adjusts how long it stays in each. It's a guide, not a cut-off: near the end Reachy asks whether to keep talking, and you can press Keep talking.` : "The Beating in Sync protocol has fixed stages (about 15 minutes)."),
           isPersonas() ? optionCards(LENGTHS, state.duration, (v) => set({ duration: v }),
             (o) => h("span", { class: "opt__big" }, `${o.mins}`, h("small", {}, " min"))) : "",
           isPersonas() ? h("p", { class: "muted small" }, `About ${Math.max(2, Math.min(8, Math.round((LENGTHS.find((l) => l.v === state.duration)?.mins || 8) * 60 / Math.max(1, n) / 13)))} replies per personality before it switches.`) : "",

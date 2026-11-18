@@ -10,7 +10,7 @@ import random
 import re
 from typing import Optional
 
-from .body.gestures import GESTURES, at_speed
+from .body.gestures import GESTURES, at_speed, transition
 from .body.voice import music_for
 from .brain.director import Director
 from .brain.modes import MODE_STYLE, Act, Mode
@@ -97,6 +97,8 @@ class Session:
             self.persona_cmd("reset")
         elif c in ("close", "finish") and self.show is not None:
             self.persona_cmd("close")
+        elif c in ("extend", "more", "keep") and self.show is not None:
+            self.persona_cmd("extend")      # Keep talking: another round past the planned length
         elif c == "hand" and self.sim_heart:
             self.sim_heart.set_hand(not args or args[0] != "off")
         elif c == "finger" and self.sim_heart:
@@ -392,7 +394,12 @@ class Session:
         from .brain.personas import BASE, PERSONAS
 
         lead = "Mm... someone's heart woke me up. " if self.heart_wake else ""
-        return lead + PERSONAS[BASE].opener
+        opener = PERSONAS[BASE].opener
+        if self.show is not None and len(self.show.cast) > 1 and opener.endswith("Ready for a little interview?"):
+            # A playful disclaimer up front, so the persona changes later feel expected (user feedback 2026-11-18).
+            opener = opener.replace("Ready for a little interview?", "Fair warning: my personality glitches "
+                                    "sometimes, so I might not stay... me. Ready for a little interview?")
+        return lead + opener
 
     def persona_event(self, reason: str, source: str = "persona") -> None:
         p, show = self.show.current, self.show
@@ -426,7 +433,7 @@ class Session:
         if show.advance(reason) is None:
             return False
         gesture, text = show.entrance()
-        self.body.play(GESTURES[show.glitch_gesture(self.rng)] + GESTURES[gesture])
+        self.body.play(transition(gesture, show.glitch_gesture(self.rng)))
         self.persona_event(reason)
         self.persona_say(text, None, "switch", why=f"glitch into {show.current.name} ({reason})")
         act = show.next_activity()
@@ -487,6 +494,9 @@ class Session:
                     self.persona_say(RESET_LINE, "antenna_wave", "reset")
                 elif kind == "close":
                     show.finished = True
+                elif kind == "extend":
+                    show.extend("facilitator")
+                    self.log.event("ending", self.clock.now(), status="extended", by="facilitator")
             if show.finished:
                 break
             ana = self.hear()
@@ -494,7 +504,7 @@ class Session:
                 line, step = show.silence_line()
                 if step == "switch":
                     if not self.persona_switch("long silence"):
-                        show.finished = True
+                        self.offline_end()
                     continue
                 self.persona_say(line, "tremble" if step == "rescue" else show.current.gestures[0], step,
                                  why=f"silence ladder: {step}")
@@ -516,13 +526,16 @@ class Session:
                 continue
             show.on_exchange()
             if show.reset_mode and show.exchanges >= show.switch_every:
-                break
+                self.offline_end()
+                if show.finished:
+                    break
+                continue
             p = show.current
             if show.switch_due():
                 body = p.reactions.get("answer", "{slot}? Huh.").replace("{slot}", slot_from(text))
                 self.persona_say(f"{show.bridge()} {body}", p.gestures[0], "react", heard=text)
                 if not self.persona_switch(f"{show.switch_every} exchanges"):
-                    show.finished = True
+                    self.offline_end()
                 continue
             gesture = self.rng.choice(p.gestures)
             line = show.reaction(text, ana.cues, ana.words)
@@ -535,6 +548,24 @@ class Session:
                     gesture, cam = p.camera[seen].split("|")
                     line = f"{cam} {line}"
             self.persona_say(line, gesture, "react", heard=text)
+
+    def offline_end(self) -> None:
+        """Planned length reached (offline lines): ask before closing; keep going on a yes or Keep talking."""
+        show = self.show
+        self.log.event("ending", self.clock.now(), status="soon", persona=show.current.key)
+        self.persona_say("Oh no, I think we're almost out of time. Want to keep talking a little longer?",
+                         show.current.gestures[0], "ending", why="planned length reached")
+        ana = self.hear()
+        asked = any(k == "extend" for k, _ in self.pending)
+        self.pending = [p for p in self.pending if p[0] != "extend"]
+        # Anything but a clear "no" (or silence) means they're still talking: keep going.
+        if asked or (ana is not None and not show.wants_end(ana.text)):
+            show.extend("facilitator" if asked else "participant")
+            self.log.event("ending", self.clock.now(), status="extended", by="facilitator" if asked else "participant")
+            self.persona_say("Yay! Okay, let's keep going.", show.current.gestures[0], "ending")
+        else:
+            show.finished = True
+            self.log.event("ending", self.clock.now(), status="closing", by="participant" if ana else "time")
 
     def persona_goodbye(self):
         self.enter(6)

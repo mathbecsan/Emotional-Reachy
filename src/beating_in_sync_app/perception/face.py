@@ -106,15 +106,16 @@ class FacePerception(threading.Thread):
             if not ok:
                 time.sleep(0.1)
                 continue
+            now = time.monotonic()               # capture time: the gaze places the face with it
             gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
             tgt = finder.find(frame)
-            now = time.monotonic()
             # "looking at Reachy" = a frontal face; turned away or followed only by the tracker counts as away
             facing = tgt is not None and tgt.source == "face" and tgt.frontal
             faces = [tgt] if facing else []
             upd = {"face_visible": facing, "num_people": max(1, finder.count)}
             if tgt is not None:
-                upd.update(face_x=round(tgt.x, 2), face_y=round(tgt.y, 2))
+                upd.update(face_x=round(tgt.x, 3), face_y=round(tgt.y, 3), face_w=round(tgt.w, 3), face_t=now,
+                           others_x=[round(o, 3) for o in finder.others])
             if facing:
                 last_seen = now
                 k = gray.shape[1] / finder.width

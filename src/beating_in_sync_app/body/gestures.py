@@ -124,6 +124,24 @@ def _pose(k) -> Pose:
 GESTURES.update({name: [_pose(k) for k in keys] for name, keys in _EXPRESS.items()})
 
 
+# Persona switches and sleep (user feedback 2026-11-18: switches felt too abrupt and dramatic).
+# A switch is now a short "processing" beat -- a pause, a soft tilt, antennas settling -- and the
+# new persona's entrance played a little slower, instead of trembling or snapping the head.
+GESTURES["soft_glitch"] = [Pose(roll=7, pitch=5, ant=(30, 12), dur=0.6), Pose(roll=7, pitch=5, ant=(30, 12), dur=0.5),
+                           Pose(roll=4, pitch=3, ant=(18, 24), dur=0.25), Pose(roll=6, pitch=5, ant=(26, 14), dur=0.25),
+                           Pose(ant=(5, 5), dur=0.7)]
+GESTURES["processing"] = [Pose(pitch=10, roll=-8, ant=(40, 40), dur=0.8), Pose(pitch=10, roll=-8, ant=(45, 35), dur=0.6),
+                          Pose(pitch=-4, roll=3, ant=(-10, -10), dur=0.8), Pose(dur=0.5)]
+# Goodbye: winds down over ~5 s (a last nod, a yawn, antennas drooping) before the sleep pose.
+GESTURES["wind_down"] = [Pose(pitch=8, ant=(15, 15), dur=0.9), Pose(pitch=-10, roll=6, z=4, ant=(0, 25), dur=1.3),
+                         Pose(pitch=12, z=-4, ant=(40, 40), dur=1.5), Pose(pitch=24, z=-10, ant=(65, 65), dur=2.0)]
+
+
+def transition(entrance: str, glitch: str = "soft_glitch") -> list[Pose]:
+    """The movement for a persona switch: a soft processing beat, then the entrance at 0.8x speed."""
+    return list(GESTURES[glitch]) + at_speed(entrance, 0.8)
+
+
 def at_speed(name: str, speed: float = 1.0) -> list[Pose]:
     """A gesture played faster or slower (0.5-2.0), e.g. the burned-out employee at 0.6."""
     s = min(2.0, max(0.5, speed))

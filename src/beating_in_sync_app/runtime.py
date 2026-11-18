@@ -97,6 +97,7 @@ class SessionRunner:
                 logger.exception("Session crashed")
                 self.bus.emit("error", message="Session crashed, see server log.")
             finally:
+                session.body.close()       # stop this session's motion loop (the next session has its own)
                 if self.pulse is not None:
                     self.pulse.stop()
                 if session.sim_heart is not None:
@@ -167,6 +168,7 @@ class SessionRunner:
                 self.bus.emit("error", message="Reachy isn't reachable: the session runs without movement. "
                                                "Turn the robot on in Reachy Mini Control.")
         body = ReachyMiniBody(self.robot, cfg.use_emotion_library, rng) if self.robot is not None else SimBody(clock)
+        body.attach_eyes(hub)          # Reachy keeps looking at the person (body/gaze.py)
         body.intensity = max(0.3, min(1.3, float(opts.motion_intensity)))
         body.speed = max(0.5, min(1.5, float(opts.motion_speed)))
         has_el = elevenlabs.api_key() is not None

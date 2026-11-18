@@ -13,6 +13,7 @@ import { sensorPanel } from "../components/sensor-panel.js";
 import { personaStrip } from "../components/persona-strip.js";
 import { avatar } from "../components/avatar.js";
 import { setCrumbs } from "../ui.js";
+import { setupGate } from "../components/setup-gate.js";
 
 // Beating in Sync modes shown as the closest costume
 const MODE_COSTUME = { sleepy: "grumpy", curious: "base", excited: "hype_bro", flirty: "smitten", teasing: "bored_teen",
@@ -37,7 +38,7 @@ function idlePanel() {
     h("h2", { class: "idle__title" }, "No session running"),
     h("p", { class: "muted" }, "Check the setup, then start a new session."),
     h("div", { class: "btn-row" },
-      h("a", { class: "btn btn--primary btn--big", href: "#/new" }, "New session"),
+      h("a", { class: "btn btn--primary btn--big", href: "#/new", onclick: (e) => { e.preventDefault(); setupGate(); } }, "New session"),
       h("a", { class: "btn btn--big", href: "#/check" }, "Setup checklist")));
 }
 
@@ -133,6 +134,13 @@ export function liveView(outlet) {
   const banner = h("div", { class: "banner", hidden: true });
   const status = h("p", { class: "live__status" }, "Waiting for a session");
   const sensorWarn = h("div", { class: "banner banner--warn", hidden: true, role: "alert" });
+  // Planned length reached: Reachy asks whether to keep going; the facilitator can decide too.
+  const endingBar = h("div", { class: "banner banner--ending", hidden: true, role: "status" },
+    h("span", {}, "⏳ Reachy is about to wrap up: the planned length is reached. It's asking the participant whether to keep talking. "),
+    h("button", { class: "btn btn--primary btn--small", type: "button",
+      onclick: () => command("/extend").then(() => toast("Another round added")).catch((e) => toast(e.message, "error")) }, "Keep talking"),
+    h("button", { class: "btn btn--small", type: "button",
+      onclick: () => command("/close").catch((e) => toast(e.message, "error")) }, "Finish now"));
   const actions = h("div", { class: "btn-row live__actions" },
     h("button", { class: "btn", type: "button", title: "Skip ahead: wakes Reachy while it's asleep, then moves on to the next personality",
       onclick: () => command("/next").catch((e) => toast(e.message, "error")) }, "Skip ahead"),
@@ -149,6 +157,7 @@ export function liveView(outlet) {
     timeline.el,
     banner,
     sensorWarn,
+    endingBar,
     strip.el,
     h("div", { class: "live__cols" },
       h("div", { class: "live__left" },
@@ -196,7 +205,7 @@ export function liveView(outlet) {
     // Everything on this screen belongs to one session: wipe it so a new session starts from zero.
     chart.reset(); log.reset(); timeline.reset(); sensors.reset(); strip.reset(); latency.reset();
     baseline = null; overSince = null;
-    sensorWarn.hidden = true; banner.hidden = true; safety.hidden = true;
+    sensorWarn.hidden = true; banner.hidden = true; safety.hidden = true; endingBar.hidden = true;
     bpmNow.textContent = "––"; bpmNow.classList.remove("heart__bpm--high"); bpmMeta.textContent = "no baseline yet";
     who.replaceChildren();
     face.setMode("sleepy"); modeName.textContent = "Asleep"; modeAct.textContent = ""; modeWhy.textContent = "Waiting for a session.";
@@ -290,6 +299,15 @@ export function liveView(outlet) {
       case "stop": log.note(`STOP — ${e.reason}`, "line--stop"); toast(`Stopped: ${e.reason}`, "error"); break;
       case "sound": log.note(`♫ ${e.text}`, "line--stage"); break;
       case "latency": latency.add(e); break;
+      case "ending":
+        endingBar.hidden = e.status !== "soon";
+        if (e.status === "soon") status.textContent = "Nearly time · asking whether to keep talking";
+        if (e.status === "extended") { status.textContent = "Keep talking · another round"; log.note(`Another round added (${e.by})`, "line--stage"); }
+        if (e.status === "closing") status.textContent = "Wrapping up";
+        break;
+      case "tone":
+        if ((e.labels || []).length) log.note(`🎙 voice: ${e.labels.join(", ")}${e.mood ? ` (${e.mood})` : ""}`, "line--stage line--debug");
+        break;
       case "sensor":
         log.note(e.text, "line--prompt");
         if (/Pulse sensors (unavailable|not answering)/.test(e.text)) {

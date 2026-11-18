@@ -356,7 +356,7 @@ CORE = [p.key for p in P if not p.experimental]
 # Alternates high and low energy and ends calm (spec: suggested session order).
 DEFAULT_ORDER = ["base", "bored_teen", "tia", "hype_bro", "noir", "diva", "villain", "burned_out", "hypochondriac"]
 
-GLITCH_GESTURES = ("tremble", "double_take")
+GLITCH_GESTURES = ("soft_glitch", "processing")   # gentle: no trembling or head snaps
 CLOSING = ["Honestly? Best interview today. All of my personalities agree.",
            "Thanks for putting up with my glitches. You were great, really."]
 RESET_LINE = "Got it, back to normal Reachy. Thanks for playing."

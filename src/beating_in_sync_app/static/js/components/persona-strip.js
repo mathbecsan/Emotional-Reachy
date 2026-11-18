@@ -15,6 +15,7 @@ export function personaStrip() {
       h("div", { class: "btn-row" },
         h("button", { class: "btn", type: "button", title: "Glitch into the next persona", onclick: () => send("/next", "Switching…") }, "Next personality →"),
         h("button", { class: "btn", type: "button", title: "Back to Base Reachy for the rest of the session", onclick: () => send("/reset", "Back to Base Reachy") }, "Reset to Base"),
+        h("button", { class: "btn", type: "button", title: "Keep the interview going past its planned length: another round of personalities", onclick: () => send("/extend", "Another round added") }, "Keep talking +"),
         h("button", { class: "btn btn--danger", type: "button", title: "Close as Base Reachy, then goodbye", onclick: () => send("/close", "Closing the interview") }, "Close interview"))),
     list);
   let cast = [], current = null, index = 0, reset = false;

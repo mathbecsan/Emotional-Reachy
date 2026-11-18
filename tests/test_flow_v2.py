@@ -108,3 +108,95 @@ def test_play_never_blocks_the_caller():
     assert time.monotonic() - t0 < 0.05
     body.wait()
     assert body.current == "listen"
+
+
+# ---------------------------------------------------------------- gaze (body/gaze.py)
+from beating_in_sync_app.body.gaze import Gaze  # noqa: E402
+
+
+def follow(gaze, face_x, seconds, start=0.0, step=0.02):
+    """Simulate the loop: the head turns, the camera sees the face move toward the image centre."""
+    t = start
+    person = None
+    while t < start + seconds:
+        yaw, pitch, body, lean = gaze.step(t)
+        gaze.commanded(t, yaw, pitch)
+        if person is None:
+            person = yaw - face_x * 35.0            # where the person really is (world frame)
+        x = (yaw - person) / 35.0                   # where they appear in the image now
+        gaze.observe(x, 0.0, 0.15, t)
+        t += step
+    return gaze.step(t), person
+
+
+def test_gaze_turns_to_the_person_and_the_body_follows():
+    g = Gaze()
+    (yaw, pitch, body, lean), person = follow(g, face_x=0.9, seconds=6)   # far to the right of the image
+    assert person < -25
+    assert abs(yaw - person) < 4                    # head on the person (micro eye movements allowed)
+    assert body < -5                                # the body turned partway to face them
+
+
+def test_gaze_leans_in_when_the_person_is_far():
+    g = Gaze()
+    for i in range(100):
+        t = i * 0.02
+        g.commanded(t, 0.0, 0.0)
+        g.observe(0.0, 0.0, 0.05, t)                # a small face: far away
+        lean = g.step(t)[3]
+    assert lean > 3
+
+
+def test_gaze_eases_back_when_the_person_leaves():
+    g = Gaze()
+    (yaw, *_), person = follow(g, face_x=0.8, seconds=4)
+    for i in range(int(40 / 0.05)):                 # 40 s with nobody in view
+        y = g.step(4 + i * 0.05)[0]
+    assert abs(y) < 3
+
+
+# ---------------------------------------------------------------- tone of voice (perception/prosody.py)
+import numpy as np  # noqa: E402
+
+from beating_in_sync_app.perception.prosody import VoiceTone  # noqa: E402
+
+
+def voice(seconds, f0, loud, wobble=0.0, rate=4.0, sr=16000):
+    t = np.arange(int(seconds * sr)) / sr
+    f = f0 * (1 + wobble * np.sin(2 * np.pi * 1.5 * t))
+    phase = 2 * np.pi * np.cumsum(f) / sr
+    syll = 0.55 + 0.45 * np.sin(2 * np.pi * rate * t)          # syllable-like loudness bumps
+    return (loud * syll * (np.sin(phase) + 0.5 * np.sin(2 * phase))).astype("float32")
+
+
+def say(tone, audio):
+    out = None
+    quiet = np.zeros(1600, dtype="float32")
+    for i in range(0, len(audio), 1600):
+        out = tone.feed(audio[i:i + 1600]) or out
+    for _ in range(10):
+        out = tone.feed(quiet) or out
+    return out
+
+
+def test_tone_compares_with_the_persons_usual_voice():
+    tone = VoiceTone()
+    for _ in range(5):
+        tone.feed(np.zeros(1600, dtype="float32") + 1e-4)
+    for _ in range(2):
+        assert say(tone, voice(2.0, 140, 0.05, wobble=0.05)) is not None       # their usual voice
+    lively = say(tone, voice(2.0, 180, 0.15, wobble=0.25, rate=6))
+    assert {"louder", "higher-pitched"} <= set(lively.labels) and lively.mood == "excited or energised"
+    low = say(tone, voice(2.0, 120, 0.015, wobble=0.0, rate=2))
+    assert {"quieter"} <= set(low.labels) and "low" in (low.mood or "")
+    assert "than before" in low.text
+
+
+def test_gaze_stops_chasing_with_a_fixed_camera():
+    g = Gaze()
+    for i in range(400):                            # the face never moves in the image, whatever the head does
+        t = i * 0.02
+        yaw, pitch, *_ = g.step(t)
+        g.commanded(t, yaw, pitch)
+        g.observe(0.9, 0.0, 0.15, t)
+    assert g.fixed_camera and abs(g.step(9.0)[0]) < 40

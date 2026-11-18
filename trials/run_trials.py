@@ -84,9 +84,9 @@ def run_trial(key: str, out: Path) -> dict:
     bus_emit = bus.emit
 
     def tap(kind, **data):
-        if kind in ("say", "heard", "persona", "director_note", "stage", "latency", "sound", "stop"):
+        if kind in ("say", "heard", "persona", "director_note", "stage", "latency", "sound", "stop", "tone"):
             cap.add(kind, **{k: v for k, v in data.items() if k in
-                             ("text", "persona", "name", "reason", "stage", "act_name", "measure", "seconds", "mode")})
+                             ("text", "persona", "name", "reason", "stage", "act_name", "measure", "seconds", "mode", "labels", "mood")})
         return bus_emit(kind, **data)
     bus.emit = tap
 
@@ -107,6 +107,11 @@ def run_trial(key: str, out: Path) -> dict:
     done = lambda: bool(session.stop_reason) or rt.persona_done()   # noqa: E731
     th = threading.Thread(target=rt.run, args=(done,), daemon=True, name=f"trial-{key}")
     th.start()
+    import numpy as np
+    for _ in range(5):
+        rt.tone.feed(np.zeros(1600, dtype="float32") + 1e-4)
+    for _ in range(2):                       # their usual voice, so later lines compare with it
+        feed_voice(rt, "usual")
 
     def quiet() -> bool:
         last = max([i["t"] for i in cap.items if i["kind"] == "say"] or [0.0])
@@ -164,6 +169,11 @@ def run_trial(key: str, out: Path) -> dict:
             else:
                 rt._on_sound(step["sound"])
             wait_turn(timeout=10, note=False)
+        elif "voice" in step:
+            # How they say the next line: synthetic speech of that style through the real tone analyser.
+            cap.add("event", text=f"(tone of voice: {step['voice']})")
+            feed_voice(rt, step["voice"])
+            time.sleep(0.3)
         elif "cmd" in step:
             cap.add("event", text=f"(facilitator: {step['cmd']})")
             session.on_command(step["cmd"])
@@ -177,6 +187,32 @@ def run_trial(key: str, out: Path) -> dict:
     rt.closed.set()
     th.join(timeout=10)
     return write_trial(key, p, cap, session, out)
+
+
+VOICES = {   # (pitch Hz, loudness, pitch wobble, syllables/s)
+    "usual": (140, 0.05, 0.05, 4.0), "excited": (185, 0.15, 0.25, 6.0), "low": (115, 0.015, 0.0, 2.0),
+    "nervous": (175, 0.04, 0.05, 6.5), "irritated": (130, 0.15, 0.01, 4.0),
+}
+
+
+def synth(style: str, seconds: float = 2.0):
+    import numpy as np
+
+    f0, loud, wobble, rate = VOICES[style]
+    t = np.arange(int(seconds * 16000)) / 16000
+    phase = 2 * np.pi * np.cumsum(f0 * (1 + wobble * np.sin(2 * np.pi * 1.5 * t))) / 16000
+    syll = 0.55 + 0.45 * np.sin(2 * np.pi * rate * t)
+    return (loud * syll * (np.sin(phase) + 0.5 * np.sin(2 * phase))).astype("float32")
+
+
+def feed_voice(rt, style: str) -> None:
+    import numpy as np
+
+    audio = np.concatenate([synth(style), np.zeros(16000, dtype="float32")])
+    for i in range(0, len(audio), 1600):
+        r = rt.tone.feed(audio[i:i + 1600])
+        if r is not None:
+            rt._on_tone(r)
 
 
 def findings(cap: Capture, session) -> dict:
@@ -226,6 +262,8 @@ def write_trial(key, p, cap, session, out: Path) -> dict:
             lines.append(f"{t} — act: {i.get('act_name')}")
         elif k == "latency":
             lines.append(f"{t} ⏱ {i['measure']} {i['seconds']} s")
+        elif k == "tone":
+            lines.append(f"{t} 🎙 tone: {', '.join(i.get('labels') or []) or 'usual'}" + (f" ({i['mood']})" if i.get("mood") else ""))
         elif k == "stop":
             lines.append(f"{t} ⛔ stop: {i.get('reason')}")
     lines += ["", "## Automatic checks", "", "```json", json.dumps(f, indent=2, ensure_ascii=False), "```", ""]

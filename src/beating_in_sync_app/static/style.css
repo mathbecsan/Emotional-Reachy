@@ -89,6 +89,8 @@ button, input, select { font: inherit; color: inherit; }
 .timeline__stage.is-skipped { opacity: 0.4; text-decoration: line-through; }
 .timeline__clock { font-variant-numeric: tabular-nums; color: var(--muted); min-width: 92px; text-align: right; }
 .timeline__clock--over { color: var(--warn); }
+.banner--ending[hidden] { display: none; }
+.banner--ending { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; border-color: var(--warn); }
 .timeline__list--acts { grid-template-columns: repeat(5, 1fr); }
 .latency { display: grid; grid-template-columns: 1fr auto; gap: 4px 12px; margin: 0; font-size: 13px; }
 .latency dt { color: var(--muted); }
@@ -815,3 +817,19 @@ body[data-view="title"] .shell__outlet, body[data-view="menu"] .shell__outlet { 
 .voice-toggle__note { display: block; font-size: 11px; opacity: 0.8; }
 .feedback__actions { margin-top: 8px; }
 .feedback__escalate { margin-top: 8px !important; padding: 8px 10px; border-radius: 10px; background: rgba(255, 201, 77, 0.1); color: var(--warn) !important; font-weight: 600; }
+
+.projection__test { position: fixed; top: 24px; left: 50%; transform: translateX(-50%); padding: 8px 16px; border-radius: 999px;
+  background: rgba(0, 0, 0, 0.55); color: #fff; font-size: 18px; letter-spacing: 0.04em; }
+.projection__test[hidden] { display: none; }
+
+/* "Setup checklist first?" pop-up before a new session */
+.gate { max-width: 460px; width: calc(100% - 32px); border: 1px solid var(--line); border-radius: 14px; padding: 22px 24px;
+  background: var(--panel); color: var(--text); box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5); }
+.gate::backdrop { background: rgba(0, 0, 0, 0.6); }
+.gate__title { margin: 0 0 8px; font-size: 22px; }
+.gate p { margin: 0 0 12px; line-height: 1.45; color: var(--text); }
+.gate__list { list-style: none; margin: 0 0 16px; padding: 0; display: grid; gap: 4px; font-size: 14px; color: var(--muted); }
+.gate__list li { display: flex; gap: 8px; align-items: center; }
+.gate__list li[data-state="pass"] .setup__mark { color: var(--ok); }
+.gate__list li[data-state="fail"] .setup__mark { color: var(--danger); }
+.gate__actions { justify-content: flex-end; flex-wrap: wrap; }

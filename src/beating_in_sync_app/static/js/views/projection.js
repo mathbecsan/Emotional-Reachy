@@ -25,13 +25,23 @@ export function projectionView(outlet, name) {
   const canvas = h("canvas", { class: "projection__canvas" });
   const caption = h("div", { class: "projection__caption" });
   const hint = h("div", { class: "projection__hint" }, "F fullscreen · Space pause · Esc back");
-  const root = h("div", { class: "projection" }, canvas, caption, hint);
+  const testTag = h("div", { class: "projection__test", hidden: true }, "Projector test · simulated heartbeat");
+  const root = h("div", { class: "projection" }, canvas, caption, hint, testTag);
   outlet.replaceChildren(root);
   document.body.classList.add("is-projection");
 
   const hues = [palette(N_POINTS, false), palette(N_POINTS, true)];
   const st = { bpm: 72, baseline: 72, energy: 0, phase: 0, mode: null, stage: null, paused: false, t0: performance.now(), live: !name };
   let replay = null, raf = 0, offEvents = null, lastFrame = performance.now();
+  // Setup checklist link (same browser): this window says what it shows and what it receives.
+  const link = { heart: 0, beats: 0, testHeart: 0, testBeats: 0, frames: 0, fps: 0, lastBpm: null, testUntil: 0 };
+  const channel = "BroadcastChannel" in window ? new BroadcastChannel("bis-projection") : null;
+  const report = () => channel?.postMessage({
+    type: "status", live: st.live, w: innerWidth, h: innerHeight, screenW: screen.width, screenH: screen.height,
+    fullscreen: !!document.fullscreenElement, fps: link.fps, heart: link.heart, beats: link.beats,
+    testHeart: link.testHeart, testBeats: link.testBeats, bpm: link.lastBpm, visible: document.visibilityState === "visible" });
+  if (channel) channel.onmessage = (m) => { if (m.data?.type === "ping") report(); };
+  const reportTimer = setInterval(() => { link.fps = link.frames; link.frames = 0; report(); }, 1000);
 
   function key(ev) {
     if (ev.key === "f" || ev.key === "F") (document.fullscreenElement ? document.exitFullscreen() : root.requestFullscreen()).catch(() => {});
@@ -54,7 +64,8 @@ export function projectionView(outlet, name) {
     });
   } else {
     offEvents = onEvent((e) => {
-      if (e.kind === "heart") st.bpm = e.bpm;
+      if (e.kind === "heart") { st.bpm = e.bpm; link.heart += 1; link.lastBpm = e.bpm; if (e.test) { link.testHeart += 1; link.testUntil = performance.now() + 2500; } }
+      if (e.kind === "pulse" && e.beat) { link.beats += 1; if (e.test) link.testBeats += 1; }
       if (e.kind === "baseline" && e.bpm) st.baseline = e.bpm;
       if (e.kind === "stage") st.stage = e.stage;
       if (e.kind === "turn") st.mode = e.mode;
@@ -73,6 +84,8 @@ export function projectionView(outlet, name) {
 
   function frame(now) {
     raf = requestAnimationFrame(frame);
+    link.frames += 1;
+    testTag.hidden = now > link.testUntil;
     const dt = Math.min(0.05, (now - lastFrame) / 1000); lastFrame = now;
     if (st.paused) return;
     const dpr = window.devicePixelRatio || 1;
@@ -129,6 +142,9 @@ export function projectionView(outlet, name) {
 
   return () => {
     cancelAnimationFrame(raf);
+    clearInterval(reportTimer);
+    channel?.postMessage({ type: "closed" });
+    channel?.close();
     window.removeEventListener("keydown", key);
     offEvents?.();
     document.body.classList.remove("is-projection");

@@ -5,6 +5,7 @@
 import { h, setCrumbs } from "../ui.js";
 import { api } from "../api.js";
 import { avatar } from "../components/avatar.js";
+import { setupGate } from "../components/setup-gate.js";
 
 export function titleView(outlet) {
   const go = () => { location.hash = "#/menu"; };
@@ -26,10 +27,10 @@ export function titleView(outlet) {
 }
 
 const ITEMS = [
+  { key: "check", href: "#/check", label: "Setup checklist", color: "#5cc8ff", costume: "hypochondriac",
+    text: "Start here: make sure Reachy, the pulse sensors, camera, microphone, speaker and light projector all work, one step at a time." },
   { key: "new", href: "#/new", label: "New session", color: "#ff5a6e", costume: "hype_bro",
     text: "Choose Reachy's personalities, how it moves and speaks, how long it lasts and what you'll do together." },
-  { key: "check", href: "#/check", label: "Setup checklist", color: "#5cc8ff", costume: "hypochondriac",
-    text: "Make sure Reachy, the pulse sensors, camera, microphone and speaker all work, one step at a time." },
   { key: "session", href: "#/session", label: "Current session", color: "#7be0a8", costume: "base",
     text: "Follow the conversation and the heartbeat while a session runs." },
   { key: "results", href: "#/results", label: "Results", color: "#ffc94d", costume: "noir",
@@ -64,7 +65,8 @@ export function menuView(outlet) {
 
   const list = h("ol", { class: "menu__list", role: "menu" }, ITEMS.map((it, i) => h("li", { role: "none" },
     h("a", { class: "menu__item", href: it.href, role: "menuitem", style: { "--accent": it.color },
-      onmouseenter: () => focus(i), onfocus: () => focus(i) },
+      onmouseenter: () => focus(i), onfocus: () => focus(i),
+      onclick: it.key === "new" ? (e) => { e.preventDefault(); setupGate(it.href); } : null },
     h("span", { class: "menu__bar", "aria-hidden": "true" }), h("span", { class: "menu__label" }, it.label)))));
 
   const root = h("section", { class: "menu" },

@@ -64,6 +64,7 @@ class FaceFinder:
         self.track_t = 0.0
         self.last: Target | None = None
         self.count = 0                       # faces in the last frame (people in view)
+        self.others: list[float] = []
 
     @property
     def engine(self) -> str:
@@ -98,6 +99,7 @@ class FaceFinder:
         need = self.keep if self.last is not None else self.acquire     # easier to keep than to acquire
         faces = [f for f in self._faces(img) if f[4] >= need]
         self.count = len(faces)
+        self.others: list[float] = []           # image x (-1..1) of everyone but the person followed
         if faces:
             if self.last is not None:          # same person: nearest to where they were
                 lx = (self.last.x + 1) / 2 * w
@@ -106,6 +108,7 @@ class FaceFinder:
             else:
                 faces.sort(key=lambda f: -f[2] * f[3])
             x, y, fw, fh, score, frontal = faces[0]
+            self.others = [(f[0] + f[2] / 2) / w * 2 - 1 for f in faces[1:]]
             # head-and-shoulders box for the fallback tracker
             bx, by = max(0, x - fw * 0.4), max(0, y - fh * 0.2)
             bw, bh = min(w - bx, fw * 1.8), min(h - by, fh * 2.2)

@@ -4,7 +4,7 @@ Perception threads (heart sensor, camera) write here; the Director reads a
 copy once per turn.
 """
 import threading
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from typing import Optional
 
 
@@ -31,6 +31,9 @@ class Signals:
     face_conf: float = 0.0
     face_x: float = 0.0                  # -1 (left of image) .. +1 (right), for turning toward the person
     face_y: float = 0.0
+    face_w: float = 0.0                  # face width / image width (small = far away)
+    face_t: float = 0.0                  # monotonic time of the frame the face was seen in (gaze, body/gaze.py)
+    others_x: list = field(default_factory=list)   # image x of the other faces in view
     motion_energy: float = 0.0           # 0..1, used in the music stage ("did they dance?")
 
 

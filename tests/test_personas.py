@@ -101,7 +101,9 @@ def test_director_asks_for_switch_then_close():
     assert rc.switch_pending == "noir" and "reachy_switch_persona with noir" in rc.sent[-1]["context"]
     rc.switch_to("noir", "agent")
     rc._persona_user("yes", ana)
-    rc._persona_user("no", ana)
+    rc._persona_user("so", ana)
+    assert rc.ending_t and not rc.closing_t                      # end of the cast: ask first, don't cut off
+    rc._persona_user("no thanks, that's enough", ana)
     assert rc.closing_t and "Close now as Base Reachy" in rc.sent[-1]["context"]
 
 
@@ -194,3 +196,46 @@ def test_facilitator_close_lands_on_base_reachy():
     assert rc.closing_t
     rc._on_tool({"tool_name": "reachy_switch_persona", "tool_call_id": "c", "parameters": {"persona": "base"}})
     assert s.show.current.key == BASE and not rc.sent[-1]["is_error"]
+
+
+def test_end_of_cast_warns_then_keeps_going_on_a_yes():
+    # User feedback: a 4-minute session was cut off mid-conversation.
+    s, rc = persona_rc(cast=("base", "noir"))
+    rc.ENDING_EXCHANGES = 2
+    ana = type("A", (), {"cues": set()})()
+    rc.switch_to("noir", "agent")
+    for line in ("rain", "coffee", "jazz", "cats", "night"):
+        rc._persona_user(line, ana)
+        if rc.ending_t:
+            break
+    assert rc.ending_t and not rc.closing_t                       # warned, not closed
+    assert "keep talking" in rc.sent[-1]["context"].lower()
+    rc._persona_user("yes, keep going!", ana)
+    assert not rc.ending_t and not rc.closing_t and not s.show.finished
+    assert len(s.show.cast) > 2                                   # another round of personas
+
+
+def test_end_of_cast_closes_on_a_no_or_after_two_more_turns():
+    s, rc = persona_rc(cast=("base", "noir"))
+    ana = type("A", (), {"cues": set()})()
+    rc.switch_to("noir", "agent")
+    for line in ("rain", "coffee", "jazz", "cats", "night"):
+        rc._persona_user(line, ana)
+        if rc.ending_t:
+            break
+    assert not rc.closing_t
+    rc._persona_user("no, I'm good, bye!", ana)
+    assert rc.closing_t
+    s2, rc2 = persona_rc(cast=("base", "noir"))
+    rc2.switch_to("noir", "agent")
+    for line in ("rain", "coffee", "jazz", "cats", "night", "hmm", "well"):
+        rc2._persona_user(line, ana)
+    assert rc2.closing_t
+
+
+def test_facilitator_keep_talking_extends_the_show():
+    s, rc = persona_rc(cast=("base", "noir"))
+    rc.switch_to("noir", "agent")
+    rc._warn_end("test")
+    rc.persona_command("extend")
+    assert not rc.ending_t and s.show.upcoming is not None

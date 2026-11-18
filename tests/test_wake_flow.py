@@ -107,23 +107,33 @@ class FakeRobot:
         time.sleep(0.001)
 
     def set_target(self, head=None, antennas=None, body_yaw=None):
-        self._rec("set_target")
+        assert head.shape == (4, 4) and len(antennas) == 2
+        self._rec("set_target", head=head, body_yaw=body_yaw)
+
+    def get_current_head_pose(self):
+        import numpy as np
+        return np.eye(4)
+
+    def get_current_joint_positions(self):
+        return [0.0] * 7, [0.0, 0.0]
 
 
 def test_reachy_body_with_fake_robot():
     robot = FakeRobot()
     body = ReachyMiniBody(robot, use_emotion_library=False)
-    body.go_to_sleep()
+    body.go_to_sleep()               # winds down, then the SDK's sleep pose
+    body.wait()
     body.play("snore", loop=False)
     body.wait()
-    body.wake_up()          # SDK sound fails -> must not raise, keyframes still play
+    body.wake_up()                   # a gradual keyframe wake (no SDK snap to neutral)
     body.wait()
     body.play("scolding")
     body.wait()
+    body.close()
     names = [c[0] for c in robot.calls]
     assert names[0] == "enable_motors"
-    assert "goto_sleep" in names and "wake_up" in names
-    assert names.count("goto_target") >= 8
+    assert "goto_sleep" in names and "wake_up" not in names
+    assert names.count("set_target") >= 100              # one smooth motion loop, not blocking moves
 
 
 def test_waits_as_long_as_needed_for_a_finger(tmp_path):
